@@ -1,0 +1,2 @@
+[workspace]
+members = [ "orbvue", "orbvue/derive", "example" ]
