@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use crate::parse::*;
+
+use crate::common::*;
+use crate::template::*;
+
 use proc_macro2::{TokenStream, Ident, Span, TokenTree};
 
 type DollarFn = dyn Fn(Ident, &str) -> Result<Vec<(Ident, TokenStream)>, String> + Send + Sync;
@@ -86,7 +89,7 @@ impl Mustache {
   }
 }
 
-pub fn compile(t: Template, ctx: &Context) -> TokenStream {
+pub fn compile<Tag: XmlTag>(t: TemplateXml<Tag>, ctx: &Context) -> TokenStream {
   use IdentComponent as Component;
   let name = t.name;
   let attrs = t.attrs.into_iter().map(|(k, v)| {
@@ -131,9 +134,10 @@ pub fn compile(t: Template, ctx: &Context) -> TokenStream {
     }
   }).collect::<Vec<_>>();
   let ctx_name = ctx.get_name(Ident::new("ctx", Span::call_site()));
-  let (prefix, suffix) = match name.to_string().as_ref() {
-    "template" => (quote!(), quote!()),
-    _ => (quote!(#name::create()), quote!(.build(#ctx_name)))
+  let (prefix, suffix) = match Tag::name() {
+    Some("template") => (quote!(), quote!()),
+    None => (quote!(#name::create()), quote!(.build(#ctx_name))),
+    _ => unreachable!("unknown tag"),
   };
 
   quote!{
@@ -185,7 +189,7 @@ pub const TEMPLATE: &'static str = r##"
 
 #[test]
 fn test_compile() {
-  use crate::parse::parse_str;
+  use crate::common::parse_str;
   let mut ctx = Context::new();
   ctx.set_name("id", "__id__".to_string());
   ctx.set_name("ctx", "__ctx__".to_string());

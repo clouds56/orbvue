@@ -3,14 +3,16 @@ extern crate proc_macro;
 #[macro_use] extern crate syn;
 #[macro_use] extern crate quote;
 
+mod common;
+mod compile;
+mod template;
+
+use common::*;
 use compile::{compile, Context};
-use parse::{parse_stream, Template};
+use template::Template;
 
 use syn::parse::{Parser, ParseStream, Result};
 use proc_macro::TokenStream;
-
-mod compile;
-mod parse;
 
 fn pop_attrs(attrs: Vec<syn::Attribute>, list: bool) -> (Vec<syn::Attribute>, Option<String>) {
   use syn::*;
