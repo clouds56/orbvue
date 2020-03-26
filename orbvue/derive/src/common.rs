@@ -243,7 +243,7 @@ impl<T: Parse> Parse for Option<T> {
 
 impl Parse for Literal {
   type Context = UnitContext;
-  fn parse<C: Cursor>(cursor: C, ctx: &mut Self::Context) -> Result<(Self, C::Marker)> {
+  fn parse<C: Cursor>(cursor: C, _: &mut Self::Context) -> Result<(Self, C::Marker)> {
     if let Some((token, cursor_next)) = cursor.token() {
       let t = match token {
         TokenTree::Literal(t) => Self::Lit(t),
