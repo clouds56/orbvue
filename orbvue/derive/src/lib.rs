@@ -3,13 +3,15 @@ extern crate proc_macro;
 #[macro_use] extern crate syn;
 #[macro_use] extern crate quote;
 
-mod common;
+#[macro_use] mod common;
 mod compile;
 mod template;
+mod script;
 
 use common::*;
 use compile::{compile, Context};
 use template::Template;
+use script::Script;
 
 use syn::parse::{Parser, ParseStream, Result};
 use proc_macro::TokenStream;

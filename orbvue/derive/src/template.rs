@@ -8,6 +8,28 @@ use proc_macro2::{
 };
 use syn::parse::Result;
 
+pub struct MustacheContext {
+  prefix: String,
+  suffix: String,
+}
+impl Default for MustacheContext {
+  fn default() -> Self {
+    Self { prefix: "{{".to_string(), suffix: "}}".to_string() }
+  }
+}
+parse_context!(impl for MustacheContext);
+
+#[derive(Default)]
+pub struct Context {
+  mustache: MustacheContext,
+}
+parse_context!(impl for Context);
+impl AsParseContext<MustacheContext> for Context {
+  fn as_ctx(&mut self) -> &mut MustacheContext {
+    &mut self.mustache
+  }
+}
+
 pub enum IdentComponent {
   V(IdentToken),
   Colon,
@@ -129,11 +151,18 @@ impl std::fmt::Debug for Comment {
 #[derive(Debug)]
 pub struct TemplateTag;
 impl XmlTag for TemplateTag {
+  type Context = Context;
   fn name() -> Option<&'static str> { Some("template") }
+}
+#[derive(Debug)]
+pub struct InnerTag;
+impl XmlTag for InnerTag {
+  type Context = Context;
+  fn name() -> Option<&'static str> { None }
 }
 pub type TemplateXml<Tag> = MetaXml<Tag, Ident, Child>;
 pub type Template = TemplateXml<TemplateTag>;
-pub type TemplateInner = TemplateXml<AnyTag>;
+pub type TemplateInner = TemplateXml<InnerTag>;
 
 #[derive(Debug)]
 pub enum Child {
@@ -143,7 +172,8 @@ pub enum Child {
 }
 
 impl Parse for Ident {
-  fn parse<C: Cursor>(mut cursor: C) -> Result<(Self, C)> {
+  type Context = UnitContext;
+  fn parse<C: Cursor>(mut cursor: C, _: &mut Self::Context) -> Result<(Self, C::Marker)> {
     let mut state = State::P0;
     enum State {
       P0 /* (@,:,str,[expr]) */, V1(IdentToken) /* v (-,:,$,=) */, V2 /* v- (str) */,
@@ -169,7 +199,7 @@ impl Parse for Ident {
       }
     }
 
-    while let Some((token, cursor_next)) = cursor.next() {
+    while let Some((token, cursor_next)) = cursor.token() {
       // TODO: check span for space
       state = match token {
         TokenTree::Punct(t) if t.as_char() == '=' => {
@@ -181,7 +211,7 @@ impl Parse for Ident {
             State::Complete(prefix, main, suffix) => Ident { prefix, main, suffix: Some(suffix) },
             _ => return error(cursor.span(), state.expect()),
           };
-          return Ok((result, cursor))
+          return Ok((result, cursor.tell()))
         },
         TokenTree::Punct(t) if t.as_char() == '@' => {
           match state {
@@ -230,7 +260,7 @@ impl Parse for Ident {
         }
         _ => return error(cursor.span(), state.expect()),
       };
-      cursor = cursor_next;
+      cursor.seek(cursor_next);
     }
     error(cursor.span(), "unexpected eof")
   }
@@ -253,8 +283,9 @@ fn parse_ident() {
 }
 
 impl Parse for Mustache {
-  fn parse<C: Cursor>(mut cursor: C) -> Result<(Self, C)> {
-    while let Some((TokenTree::Group(t), cursor_next)) = cursor.next() {
+  type Context = MustacheContext;
+  fn parse<C: Cursor>(mut cursor: C, _: &mut Self::Context) -> Result<(Self, C::Marker)> {
+    while let Some((TokenTree::Group(t), cursor_next)) = cursor.token() {
       let mut inner = t.stream().into_iter();
       if t.delimiter() != Delimiter::Brace {
         return error(cursor.span(), "expect brace");
@@ -278,8 +309,8 @@ impl Parse for Mustache {
       if let Some(t) = inner.next() {
         return error(t.span(), "unexpected token");
       }
-      cursor = cursor_next;
-      return Ok((Mustache { prefix, content: MustacheItem::from(content) }, cursor))
+      cursor.seek(cursor_next);
+      return Ok((Mustache { prefix, content: MustacheItem::from(content) }, cursor.tell()))
     }
     return error(cursor.span(), "expect group")
   }
@@ -295,7 +326,8 @@ fn parse_mustache() {
 }
 
 impl Parse for Comment {
-  fn parse<C: Cursor>(mut cursor: C) -> Result<(Self, C)> {
+  type Context = UnitContext;
+  fn parse<C: Cursor>(mut cursor: C, _: &mut Self::Context) -> Result<(Self, C::Marker)> {
     let mut state = State::M0;
     enum State {
       M0, M1 /* < (!) */, M2(usize) /* <! (--) */,
@@ -307,7 +339,7 @@ impl Parse for Comment {
       }
     }
     let mut last: Option<Span> = None;
-    while let Some((t, cursor_next)) = cursor.next() {
+    while let Some((t, cursor_next)) = cursor.token() {
       let current = t.span();
       let diff = SpanDiff::new(last, current);
       state = match state {
@@ -339,9 +371,9 @@ impl Parse for Comment {
         },
         _ => return error(cursor.span(), state.expect()),
       };
-      cursor = cursor_next;
+      cursor.seek(cursor_next);
       if let State::M4(content) = state {
-        return Ok((Comment { content }, cursor));
+        return Ok((Comment { content }, cursor.tell()));
       }
       last = Some(current);
     }
@@ -358,16 +390,14 @@ fn parse_comment() {
 }
 
 impl Parse for Child {
-  fn parse<C: Cursor>(mut cursor: C) -> Result<(Self, C)> {
-    if let Ok((k, cursor_next)) = Comment::parse(cursor.clone()) {
-      cursor = cursor_next;
-      Ok((Child::C(k), cursor))
-    } else if let Ok((k, cursor_next)) = TemplateInner::parse(cursor.clone()) {
-      cursor = cursor_next;
-      Ok((Child::T(k), cursor))
-    } else if let Ok((k, cursor_next)) = Mustache::parse(cursor.clone()) {
-      cursor = cursor_next;
-      Ok((Child::M(k), cursor))
+  type Context = Context;
+  fn parse<C: Cursor>(cursor: C, ctx: &mut Self::Context) -> Result<(Self, C::Marker)> {
+    if let Ok((k, cursor_next)) = Comment::parse(cursor.clone(), ctx.as_ctx()) {
+      Ok((Child::C(k), cursor_next))
+    } else if let Ok((k, cursor_next)) = TemplateInner::parse(cursor.clone(), ctx) {
+      Ok((Child::T(k), cursor_next))
+    } else if let Ok((k, cursor_next)) = Mustache::parse(cursor.clone(), ctx.as_ctx()) {
+      Ok((Child::M(k), cursor_next))
     } else {
       error(cursor.span(), "not valid child")
     }
