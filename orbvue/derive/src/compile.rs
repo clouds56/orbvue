@@ -6,7 +6,7 @@ use crate::template::*;
 
 use proc_macro2::{TokenStream, Ident, Span, TokenTree};
 
-type DollarFn = dyn Fn(Ident, &str) -> Result<Vec<(Ident, TokenStream)>, String> + Send + Sync;
+type DollarFn = dyn Fn(&Ident, &str) -> Result<Vec<(Ident, TokenStream)>, String> + Send + Sync;
 #[derive(Default, Clone)]
 pub struct Context {
   pub dollar: HashMap<String, HashMap<String, Arc<DollarFn>>>,
@@ -22,7 +22,7 @@ impl Context {
   pub fn set_dollar(&mut self, k1: &str, k2: &str, v: &'static DollarFn) {
     self.dollar.entry(k1.to_string()).or_default().insert(k2.to_string(), Arc::new(v));
   }
-  pub fn get_name(&self, k: Ident) -> Option<Ident> {
+  pub fn get_name(&self, k: &Ident) -> Option<Ident> {
     self.name.get(&k.to_string()).map(|v| Ident::new(v, k.span()))
   }
   pub fn set_name(&mut self, k: &str, v: String) {
@@ -44,15 +44,15 @@ fn split_tokens<T: std::str::FromStr + quote::ToTokens>(s: &str) -> Vec<TokenStr
   result
 }
 
-pub fn dollar_grid_rows(k: Ident, s: &str) -> Result<Vec<(Ident, TokenStream)>, String> {
+pub fn dollar_grid_rows(k: &Ident, s: &str) -> Result<Vec<(Ident, TokenStream)>, String> {
   let value = split_tokens::<f64>(s);
-  Ok(vec![(k, quote! {
+  Ok(vec![(k.clone(), quote! {
     Rows::create()#(.row(#value))*.build()
   })])
 }
-pub fn dollar_grid_columns(k: Ident, s: &str) -> Result<Vec<(Ident, TokenStream)>, String> {
+pub fn dollar_grid_columns(k: &Ident, s: &str) -> Result<Vec<(Ident, TokenStream)>, String> {
   let value = split_tokens::<f64>(s);
-  Ok(vec![(k, quote! {
+  Ok(vec![(k.clone(), quote! {
     Columns::create()#(.column(#value))*.build()
   })])
 }
@@ -67,60 +67,60 @@ lazy_static! {
 }
 
 impl Mustache {
-  fn apply_item(item: MustacheItem, ctx: &Context) -> TokenTree {
+  fn apply_item(item: &MustacheItem, ctx: &Context) -> TokenTree {
     match item {
-      MustacheItem::K(k) => k,
+      MustacheItem::K(k) => k.clone(),
       MustacheItem::G(d, v, span) => {
         use proc_macro2::Group;
         let v = v.into_iter().map(|i| Mustache::apply_item(i, ctx)).collect();
-        let mut g = Group::new(d, v);
-        g.set_span(span);
+        let mut g = Group::new(*d, v);
+        g.set_span(*span);
         g.into()
       },
       MustacheItem::P(p) => ctx.get_name(p).expect("get name").into(),
     }
   }
 
-  pub fn apply(self, ctx: &Context) -> TokenStream {
+  pub fn apply(&self, ctx: &Context) -> TokenStream {
     match self.prefix {
       MustachePrefix::And | MustachePrefix::None =>
-        self.content.into_iter().map(|i| Self::apply_item(i, ctx)).collect(),
+        self.content.iter().map(|i| Self::apply_item(i, ctx)).collect(),
     }
   }
 }
 
-pub fn compile<Tag: XmlTag>(t: TemplateXml<Tag>, ctx: &Context) -> TokenStream {
+pub fn compile<Tag: XmlTag>(t: &TemplateXml<Tag>, ctx: &Context) -> TokenStream {
   use IdentComponent as Component;
-  let name = t.name;
-  let attrs = t.attrs.into_iter().map(|(k, v)| {
+  let name = &t.name;
+  let attrs = t.attrs.iter().map(|(k, v)| {
     if k.prefix.is_some() {
       unimplemented!("attr prefix not implemented");
     }
-    let key = match k.main {
+    let key = match &k.main {
       Component::I(t) => t,
       t @ Component::At | t @ Component::Colon | t @ Component::Dollar => panic!("unexpected component {:?}", t),
       _ => unimplemented!("other prefix not implemented"),
     };
-    let value = match k.suffix {
+    let value = match &k.suffix {
       Some(Component::Colon) => {
         let m = Mustache::parse_lit(v).unwrap();
         let v = m.apply(ctx);
         quote! { #v }
       },
       Some(Component::Dollar) => {
-        let s = parse_lit(v).unwrap();
+        let s = v.value_str().unwrap();
         let f= ctx.get_dollar(&name.to_string(), &key.to_string()).ok_or_else(|| format!("{}::{}", name, key)).expect("get_dollar");
         let v = f(key, &s).unwrap().into_iter().map(|(k, v)| quote! { .#k(#v) }).collect::<Vec<_>>();
         return quote! { #(#v)* }
       },
-      None => quote!{ #v },
+      None => { let v = &v.lit; quote!{ #v } },
       t @ _ => panic!("unexpected suffix component {:?}", t),
     };
     quote! {
       .#key(#value)
     }
   }).collect::<Vec<_>>();
-  let children = t.children.into_iter().filter_map(|c| {
+  let children = t.children.iter().filter_map(|c| {
     match c {
       Child::C(_) => None,
       Child::M(m) => {
@@ -133,7 +133,7 @@ pub fn compile<Tag: XmlTag>(t: TemplateXml<Tag>, ctx: &Context) -> TokenStream {
       Child::T(t) => Some(compile(t, ctx)),
     }
   }).collect::<Vec<_>>();
-  let ctx_name = ctx.get_name(Ident::new("ctx", Span::call_site()));
+  let ctx_name = ctx.get_name(&Ident::new("ctx", Span::call_site()));
   let (prefix, suffix) = match Tag::name() {
     Some("template") => (quote!(), quote!()),
     None => (quote!(#name::create()), quote!(.build(#ctx_name))),
@@ -187,6 +187,76 @@ pub const TEMPLATE: &'static str = r##"
 </template>
   "##;
 
+#[cfg(test)]
+const SCRIPT: &'static str = r##"
+<script lang="rs">
+fn generate_digit_button(
+  ctx: &mut BuildContext,
+  id: Entity,
+  sight: char,
+  primary: bool,
+  column: usize,
+  column_span: usize,
+  row: usize,
+) -> Entity {
+  let mut button = Button::create()
+    .class("single_content")
+    .min_size(48.0, 48.0)
+    .text(sight.to_string())
+    .on_click(move |states, _| -> bool {
+      states.get_mut::<MainViewState>(id).action(Action::Digit(sight));
+      true
+    })
+    .attach(Grid::column(column))
+    .attach(Grid::row(row))
+    .attach(Grid::column_span(column_span));
+
+  if primary {
+    button = button.class("primary");
+  }
+
+  button.build(ctx)
+}
+
+fn generate_operation_button(
+  ctx: &mut BuildContext,
+  id: Entity,
+  sight: char,
+  primary: bool,
+  column: usize,
+  column_span: usize,
+  row: usize,
+) -> Entity {
+  let mut button = Button::create()
+    .class("single_content")
+    .min_size(48.0, 48.0)
+    .text(sight.to_string())
+    .class("square")
+    .on_click(move |states, _| -> bool {
+      states.get_mut::<MainViewState>(id).action(Action::Operator(sight));
+      true
+    })
+    .attach(Grid::column(column))
+    .attach(Grid::column_span(column_span))
+    .attach(Grid::row(row));
+
+  if primary {
+    button = button.class("primary");
+  }
+
+  button.build(ctx)
+}
+
+impl Template for MainView {
+  #[orbvue::template]
+  fn template(self, #[orbvue="id"] id: Entity, #[orbvue="ctx"] ctx: &mut BuildContext) -> Self {
+    #[orbvue="expr"]
+    self
+  }
+}
+</script>
+  "##;
+
 #[test]
 fn test_compile() {
   use crate::common::parse_str;
@@ -194,5 +264,18 @@ fn test_compile() {
   ctx.set_name("id", "__id__".to_string());
   ctx.set_name("ctx", "__ctx__".to_string());
   let t = parse_str::<Template>(TEMPLATE).unwrap();
-  println!("{}", compile(t, &ctx));
+  println!("{}", compile(&t, &ctx));
+}
+
+#[test]
+fn test_gen_script() {
+  use crate::script::{Script, ItemFnVisitor, Child};
+  use syn::visit_mut::VisitMut;
+  let s = parse_str::<Script>(SCRIPT).unwrap();
+  let t = parse_str::<Template>(TEMPLATE).unwrap();
+  let mut visitor = ItemFnVisitor::new(&t, Context::new());
+  for Child::I(item) in s.children {
+    let mut item = item.0;
+    visitor.visit_item_mut(&mut item);
+  }
 }

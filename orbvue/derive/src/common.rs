@@ -1,7 +1,6 @@
 use proc_macro2::{
   TokenTree, Span,
   Ident as IdentToken,
-  Literal as LiteralToken,
 };
 use syn::Result;
 
@@ -35,6 +34,38 @@ impl SpanDiff {
   }
   pub fn is_empty(&self) -> bool {
     self.0 == 0 && self.1 == 0
+  }
+}
+
+pub struct LiteralToken {
+  pub lit: syn::Lit,
+  pub span: Span,
+}
+impl LiteralToken {
+  pub fn span(&self) -> Span { self.span }
+  pub fn value_str(&self) -> Option<String> {
+    use syn::*;
+    match &self.lit {
+      Lit::Str(lit) => Some(lit.value()),
+      _ => None
+    }
+  }
+}
+impl From<proc_macro2::Literal> for LiteralToken {
+  fn from(lit: proc_macro2::Literal) -> Self {
+    use proc_macro2::*;
+    let span = lit.span();
+    let token: TokenTree = lit.into();
+    let token_stream: TokenStream = vec![token].into_iter().collect();
+    let lit = syn::parse2(token_stream).expect("round trip literal");
+    Self { lit, span }
+  }
+}
+impl std::fmt::Debug for LiteralToken {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    let i = &self.lit;
+    let i = quote!(#i);
+    write!(f, "r#{}#", i.to_string())
   }
 }
 
@@ -269,7 +300,7 @@ impl<Tag: XmlTag, Ident: Parse, Child: Parse> Parse for MetaXml<Tag, Ident, Chil
         },
         TokenTree::Literal(t) => {
           match state {
-            State::A2(i, mut a, k) => { a.push((k, t.clone())); State::A0(i, a) },
+            State::A2(i, mut a, k) => { a.push((k, t.clone().into())); State::A0(i, a) },
             _ => return error(cursor.span(), state.expect()),
           }
         },

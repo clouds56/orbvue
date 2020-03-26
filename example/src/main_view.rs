@@ -1,6 +1,46 @@
-use orbtk::prelude::*;
 use orbvue::build_template;
 
+build_template!{
+<template name="MainView" width:="212.0" height:="336.0" text="">
+  <Grid rows$="72.0 *">
+    <Container padding:="8.0" element="container" class="header" attach:="Grid::row(0)">
+      <Grid>
+        <ScrollViewer scroll_viewer_mode:=r#"("custom", "disabled")"#>
+          <TextBlock width:="0.0" height:="14.0" text="" element="text-block" id="input" vertical_alignment="start" />
+        </ScrollViewer>
+        <TextBlock text:="$id" element="text-block" vertical_alignment="end" horizontal_alignment="end" />
+      </Grid>
+    </Container>
+    <Container padding:="8.0" element="container" class="content" attach:="Grid::row(1)">
+      <Grid columns$="48.0 4.0 48.0 4.0 48.0 4.0 48.0 4.0 48.0" rows$="48.0 4.0 48.0 4.0 48.0 4.0 48.0 4.0 48.0">
+        <!-- row 0 -->
+        {{& generate_operation_button($ctx, $id, 'C', false, 0, 5, 0) }}
+        {{& generate_operation_button($ctx, $id, '/', true, 6, 1, 0) }}
+        <!-- row 2 -->
+        {{& generate_digit_button($ctx, $id, '7', false, 0, 1, 2) }}
+        {{& generate_digit_button($ctx, $id, '8', false, 2, 1, 2) }}
+        {{& generate_digit_button($ctx, $id, '9', false, 4, 1, 2) }}
+        {{& generate_operation_button($ctx, $id, '*', true, 6, 1, 2) }}
+        <!-- row 4 -->
+        {{& generate_digit_button($ctx, $id, '4', false, 0, 1, 4) }}
+        {{& generate_digit_button($ctx, $id, '5', false, 2, 1, 4) }}
+        {{& generate_digit_button($ctx, $id, '6', false, 4, 1, 4) }}
+        {{& generate_operation_button($ctx, $id, '-', true, 6, 1, 4) }}
+        <!-- row 6 -->
+        {{& generate_digit_button($ctx, $id, '1', false, 0, 1, 6) }}
+        {{& generate_digit_button($ctx, $id, '2', false, 2, 1, 6) }}
+        {{& generate_digit_button($ctx, $id, '3', false, 4, 1, 6) }}
+        {{& generate_operation_button($ctx, $id, '+', true, 6, 1, 6) }}
+        <!-- row 8 -->
+        {{& generate_digit_button($ctx, $id, '0', false, 0, 3, 8) }}
+        {{& generate_digit_button($ctx, $id, '.', false, 4, 1, 8) }}
+        {{& generate_operation_button($ctx, $id, '=', true, 6, 1, 8) }}
+      </Grid>
+    </Container>
+  </Grid>
+</template>
+
+<script>
 #[derive(Debug, Copy, Clone)]
 enum Action {
   Digit(char),
@@ -171,48 +211,11 @@ widget!(MainView<MainViewState> {
 });
 
 impl Template for MainView {
-  build_template!{
-  fn template(self, #[vue="id"] id: Entity, #[vue="ctx"] ctx: &mut BuildContext) -> Self {
-    #[vue(template)]
+  #[orbvue::template]
+  fn template(self, #[orbvue="id"] id: Entity, #[orbvue="ctx"] ctx: &mut BuildContext) -> Self {
+    #[orbvue="expr"]
     self
-  },
-  <template name="MainView" width:="212.0" height:="336.0" text="">
-    <Grid rows$="72.0 *">
-      <Container padding:="8.0" element="container" class="header" attach:="Grid::row(0)">
-        <Grid>
-          <ScrollViewer scroll_viewer_mode:=r#"("custom", "disabled")"#>
-            <TextBlock width:="0.0" height:="14.0" text="" element="text-block" id="input" vertical_alignment="start" />
-          </ScrollViewer>
-          <TextBlock text:="$id" element="text-block" vertical_alignment="end" horizontal_alignment="end" />
-        </Grid>
-      </Container>
-      <Container padding:="8.0" element="container" class="content" attach:="Grid::row(1)">
-        <Grid columns$="48.0 4.0 48.0 4.0 48.0 4.0 48.0 4.0 48.0" rows$="48.0 4.0 48.0 4.0 48.0 4.0 48.0 4.0 48.0">
-          <!-- row 0 -->
-          {{& generate_operation_button($ctx, $id, 'C', false, 0, 5, 0) }}
-          {{& generate_operation_button($ctx, $id, '/', true, 6, 1, 0) }}
-          <!-- row 2 -->
-          {{& generate_digit_button($ctx, $id, '7', false, 0, 1, 2) }}
-          {{& generate_digit_button($ctx, $id, '8', false, 2, 1, 2) }}
-          {{& generate_digit_button($ctx, $id, '9', false, 4, 1, 2) }}
-          {{& generate_operation_button($ctx, $id, '*', true, 6, 1, 2) }}
-          <!-- row 4 -->
-          {{& generate_digit_button($ctx, $id, '4', false, 0, 1, 4) }}
-          {{& generate_digit_button($ctx, $id, '5', false, 2, 1, 4) }}
-          {{& generate_digit_button($ctx, $id, '6', false, 4, 1, 4) }}
-          {{& generate_operation_button($ctx, $id, '-', true, 6, 1, 4) }}
-          <!-- row 6 -->
-          {{& generate_digit_button($ctx, $id, '1', false, 0, 1, 6) }}
-          {{& generate_digit_button($ctx, $id, '2', false, 2, 1, 6) }}
-          {{& generate_digit_button($ctx, $id, '3', false, 4, 1, 6) }}
-          {{& generate_operation_button($ctx, $id, '+', true, 6, 1, 6) }}
-          <!-- row 8 -->
-          {{& generate_digit_button($ctx, $id, '0', false, 0, 3, 8) }}
-          {{& generate_digit_button($ctx, $id, '.', false, 4, 1, 8) }}
-          {{& generate_operation_button($ctx, $id, '=', true, 6, 1, 8) }}
-        </Grid>
-      </Container>
-    </Grid>
-  </template>
   }
+}
+</script>
 }

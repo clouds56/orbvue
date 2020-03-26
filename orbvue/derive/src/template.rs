@@ -3,7 +3,6 @@ use crate::common::*;
 use proc_macro2::{
   TokenStream, TokenTree,
   Ident as IdentToken,
-  Literal as LiteralToken,
   Delimiter, Span,
 };
 use syn::parse::Result;
@@ -111,9 +110,9 @@ pub struct Mustache {
 }
 
 impl Mustache {
-  pub fn parse_lit(lit: LiteralToken) -> Result<Self> {
+  pub fn parse_lit(lit: &LiteralToken) -> Result<Self> {
     let span = lit.span();
-    let v = parse_lit(lit).ok_or_else(|| syn::Error::new(span, "parse_lit"))?;
+    let v = lit.value_str().ok_or_else(|| syn::Error::new(span, "parse_lit"))?;
     let stream = v.parse::<TokenStream>().map_err(|_| syn::Error::new(span, "parse TokenStream"))?;
     Ok(Self { prefix: MustachePrefix::None, content: MustacheItem::from(stream) })
   }
@@ -270,7 +269,7 @@ impl Parse for Ident {
 fn parse_ident() {
   fn parse_stream_ident(stream: syn::parse::ParseStream) -> Result<Ident> {
     let s = parse_stream::<Ident>(stream)?;
-    stream.parse::<Token![=]>().map(|_| s)
+    stream.parse::<syn::token::Eq>().map(|_| s)
   };
   let parse_str = |s: &str| syn::parse::Parser::parse_str(parse_stream_ident, s);
   assert_eq!(format!("{:?}", parse_str("v=").unwrap()), "Ident(I(v))".to_string());
@@ -404,8 +403,8 @@ impl Parse for Child {
   }
 }
 
-pub fn parse_lit(lit: LiteralToken) -> Option<String> {
-  let s = lit.to_string();
+#[allow(dead_code)]
+pub fn parse_litstr(s: String) -> Option<String> {
   let mut state = State::S0;
   enum Escape {
     E1 /* \ */, E2 /* \u */, E3(String) /* \u{ */, Complete(char),
@@ -483,7 +482,7 @@ pub fn parse_lit(lit: LiteralToken) -> Option<String> {
 }
 
 #[cfg(test)]
-pub const TEMPLATE: &'static str = r##"
+const TEMPLATE: &'static str = r##"
 <template>
   <Grid :a="" b:="100" c$="* *" v-if:b="" @c=r#""c""# >
     <Text v-for="x in y" key:="x.id" v-bind:[var]="value" />
