@@ -16,13 +16,13 @@ impl Default for MustacheContext {
     Self { prefix: "{{".to_string(), suffix: "}}".to_string() }
   }
 }
-parse_context!(impl for MustacheContext);
+parse_context!(MustacheContext);
 
 #[derive(Default)]
 pub struct Context {
   mustache: MustacheContext,
 }
-parse_context!(impl for Context);
+parse_context!(Context);
 impl AsParseContext<MustacheContext> for Context {
   fn as_ctx(&mut self) -> &mut MustacheContext {
     &mut self.mustache
@@ -110,7 +110,7 @@ pub struct Mustache {
 }
 
 impl Mustache {
-  pub fn parse_lit(lit: &LiteralToken) -> Result<Self> {
+  pub fn parse_lit(lit: &Literal) -> Result<Self> {
     let span = lit.span();
     let v = lit.value_str().ok_or_else(|| syn::Error::new(span, "parse_lit"))?;
     let stream = v.parse::<TokenStream>().map_err(|_| syn::Error::new(span, "parse TokenStream"))?;

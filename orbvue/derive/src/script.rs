@@ -8,11 +8,7 @@ use proc_macro2::{
 };
 use syn::parse::Result;
 
-pub trait Parse2: Sized {
-  fn parse<P: Parsable, T: syn::parse::Parse>(parser: P) -> Result<(T, P::Marker)> {
-    parser.parse()
-  }
-}
+pub use syn::visit_mut::VisitMut;
 
 pub struct Context {
   lang: String,
@@ -22,7 +18,7 @@ impl Default for Context {
     Self { lang: "rs".to_string() }
   }
 }
-parse_context!(impl for Context);
+parse_context!(Context);
 
 #[derive(Debug)]
 pub struct Ident(pub IdentToken);
@@ -45,8 +41,13 @@ impl XmlTag for ScriptTag {
 }
 pub type Script = MetaXml<ScriptTag, Ident, Child>;
 
-#[derive(Debug)]
 pub struct RustItem(pub syn::Item);
+impl std::fmt::Debug for RustItem {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    let item = &self.0;
+    write!(f, "r#: {}", quote!{#item})
+  }
+}
 impl Parse for RustItem {
   type Context = ();
   fn parse<C: Cursor>(cursor: C, _: &mut Self::Context) -> Result<(Self, C::Marker)> {
@@ -62,6 +63,11 @@ pub enum Child {
 impl Parse for Child {
   type Context = Context;
   fn parse<C: Cursor>(cursor: C, ctx: &mut Self::Context) -> Result<(Self, C::Marker)> {
+    if let Some((TokenTree::Punct(t), _)) = cursor.token() {
+      if t.as_char() == '<' {
+        return error(cursor.span(), "child end");
+      }
+    }
     if let Ok((k, cursor_next)) = RustItem::parse(cursor.clone(), ctx.as_ctx()) {
       Ok((Child::I(k), cursor_next))
     } else {
@@ -230,14 +236,12 @@ impl<'a> ItemFnVisitor<'a> {
 
 #[test]
 fn test_gen_script() {
-  use syn::visit_mut::VisitMut;
   const TEMPLATE: &'static str = r##"<template name="hello" />"##;
   let s = parse_str::<Script>(SCRIPT).unwrap();
   let t = parse_str::<Template>(TEMPLATE).unwrap();
   let mut visitor = ItemFnVisitor::new(&t, CompileContext::new());
-  for Child::I(item) in s.children {
-    let mut item = item.0;
-    visitor.visit_item_mut(&mut item);
-    println!("{}", quote!{#item});
+  for Child::I(mut item) in s.children {
+    visitor.visit_item_mut(&mut item.0);
+    println!("{:?}", item);
   }
 }

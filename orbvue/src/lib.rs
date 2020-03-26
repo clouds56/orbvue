@@ -95,5 +95,39 @@ mod test {
       }
     }
     </script>
+    <css scoped=true>r#"
+    .header {
+      background: #444e55;
+    }
+
+    .content {
+      background: #3b434a;
+    }
+
+    text_box {
+      background: transparent;
+      border-width: 0;
+      color: #9dafbf;
+      font-size: 16;
+    }
+
+    #input {
+      font-size: 16;
+    }
+
+    text-block {
+      font-size: 42;
+      color: #dfebf5;
+    }
+
+    #input {
+      background: transparent;
+    }
+
+    button {
+      border-radius: 1;
+      font-size: 20;
+    }
+    "#""</css>
   }
 }

@@ -24,7 +24,7 @@ impl SpanDiff {
     }
     let l = current.start().line - last.unwrap().end().line;
     if l != 0 {
-      return SpanDiff(l, 0);
+      return SpanDiff(l, current.start().column);
     }
     if current.start().column < last.unwrap().end().column {
       SpanDiff(0, 0)
@@ -37,31 +37,56 @@ impl SpanDiff {
   }
 }
 
-pub struct LiteralToken {
-  pub lit: syn::Lit,
+pub enum LiteralToken {
+  Lit(syn::Lit),
+  True(IdentToken),
+  False(IdentToken),
+}
+pub struct Literal {
+  pub lit: LiteralToken,
   pub span: Span,
 }
-impl LiteralToken {
+impl quote::ToTokens for LiteralToken {
+  fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+    match self {
+      LiteralToken::Lit(t) => t.to_tokens(tokens),
+      LiteralToken::True(t) | LiteralToken::False(t) => t.to_tokens(tokens),
+    }
+  }
+}
+impl Literal {
   pub fn span(&self) -> Span { self.span }
   pub fn value_str(&self) -> Option<String> {
     use syn::*;
     match &self.lit {
-      Lit::Str(lit) => Some(lit.value()),
+      LiteralToken::Lit(Lit::Str(lit)) => Some(lit.value()),
       _ => None
     }
   }
-}
-impl From<proc_macro2::Literal> for LiteralToken {
-  fn from(lit: proc_macro2::Literal) -> Self {
+  #[allow(non_snake_case)]
+  pub fn Lit(lit: proc_macro2::Literal) -> Self {
     use proc_macro2::*;
     let span = lit.span();
     let token: TokenTree = lit.into();
     let token_stream: TokenStream = vec![token].into_iter().collect();
     let lit = syn::parse2(token_stream).expect("round trip literal");
-    Self { lit, span }
+    Self { lit: LiteralToken::Lit(lit), span }
+  }
+  #[allow(non_snake_case)]
+  pub fn True(t: IdentToken) -> Self {
+    Self { span: t.span(), lit: LiteralToken::True(t) }
+  }
+  #[allow(non_snake_case)]
+  pub fn False(t: IdentToken) -> Self {
+    Self { span: t.span(), lit: LiteralToken::False(t) }
   }
 }
-impl std::fmt::Debug for LiteralToken {
+impl From<proc_macro2::Literal> for Literal {
+  fn from(lit: proc_macro2::Literal) -> Self {
+    Self::Lit(lit)
+  }
+}
+impl std::fmt::Debug for Literal {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     let i = &self.lit;
     let i = quote!(#i);
@@ -159,7 +184,7 @@ impl AsParseContext<UnitContext> for UnitContext {
 }
 
 macro_rules! parse_context {
-  (impl$(($($t:tt)*))? for $name:ident $($t2:tt)*) => {
+  (impl{$($t:tt)*} for $name:ident $($t2:tt)*) => {
     impl$(<$($t)*>)? ParseContext for $name $($t2)* {}
     impl$(<$($t)*>)? AsParseContext<$name $($t2)*> for $name $($t2)* {
       fn as_ctx(&mut self) -> &mut Self { self }
@@ -167,6 +192,9 @@ macro_rules! parse_context {
     impl$(<$($t)*>)? AsParseContext<UnitContext> for $name $($t2)* {
       fn as_ctx(&mut self) -> &mut UnitContext { unsafe { std::mem::transmute(self) } }
     }
+  };
+  ($name:ident) => {
+    parse_context!(impl{} for $name);
   };
 }
 
@@ -200,7 +228,34 @@ pub(crate) fn error<T, S: ToString>(c: Span, s: S) -> syn::parse::Result<T> {
   Err(syn::Error::new(c, s.to_string()))
 }
 
-pub type Attrs<Ident> = Vec<(Ident, LiteralToken)>;
+pub type Attrs<Ident> = Vec<(Ident, Literal)>;
+
+impl<T: Parse> Parse for Option<T> {
+  type Context = T::Context;
+  fn parse<C: Cursor>(cursor: C, ctx: &mut Self::Context) -> Result<(Self, C::Marker)> {
+    let cursor_current = cursor.tell();
+    match T::parse(cursor, ctx) {
+      Ok((t, cursor_next)) => Ok((Some(t), cursor_next)),
+      Err(_) => Ok((None, cursor_current)),
+    }
+  }
+}
+
+impl Parse for Literal {
+  type Context = UnitContext;
+  fn parse<C: Cursor>(cursor: C, ctx: &mut Self::Context) -> Result<(Self, C::Marker)> {
+    if let Some((token, cursor_next)) = cursor.token() {
+      let t = match token {
+        TokenTree::Literal(t) => Self::Lit(t),
+        TokenTree::Ident(t) if &t.to_string() == "true" => Self::True(t),
+        TokenTree::Ident(t) if &t.to_string() == "false" => Self::False(t),
+        _ => return error(cursor.span(), "not a literal"),
+      };
+      return Ok((t, cursor_next))
+    }
+    error(cursor.span(), "unexpected eof")
+  }
+}
 
 pub trait XmlTag {
   type Context: ParseContext;
@@ -306,6 +361,8 @@ impl<Tag: XmlTag, Ident: Parse, Child: Parse> Parse for MetaXml<Tag, Ident, Chil
         },
         TokenTree::Ident(t) => {
           match state {
+            State::A2(i, mut a, k) if &t.to_string() == "true" => { a.push((k, Literal::True(t.clone()))); State::A0(i, a) },
+            State::A2(i, mut a, k) if &t.to_string() == "false" => { a.push((k, Literal::False(t.clone()))); State::A0(i, a) },
             State::T1 => {
               Tag::check(&t)?;
               State::A0(t.clone(), vec![])

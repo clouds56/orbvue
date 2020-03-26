@@ -269,8 +269,7 @@ fn test_compile() {
 
 #[test]
 fn test_gen_script() {
-  use crate::script::{Script, ItemFnVisitor, Child};
-  use syn::visit_mut::VisitMut;
+  use crate::script::{Script, ItemFnVisitor, Child, VisitMut};
   let s = parse_str::<Script>(SCRIPT).unwrap();
   let t = parse_str::<Template>(TEMPLATE).unwrap();
   let mut visitor = ItemFnVisitor::new(&t, Context::new());
