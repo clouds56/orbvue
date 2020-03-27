@@ -56,11 +56,11 @@ impl quote::ToTokens for LiteralToken {
 }
 impl Literal {
   pub fn span(&self) -> Span { self.span }
-  pub fn value_str(&self) -> Option<String> {
+  pub fn value_str(&self) -> Result<String> {
     use syn::*;
     match &self.lit {
-      LiteralToken::Lit(Lit::Str(lit)) => Some(lit.value()),
-      _ => None
+      LiteralToken::Lit(Lit::Str(lit)) => Ok(lit.value()),
+      _ => error(self.span, "expect string literal token"),
     }
   }
   #[allow(non_snake_case)]
@@ -109,7 +109,26 @@ pub trait CursorCore: Spanable + Clone {
   fn tell(&self) -> Self::Marker;
 }
 
-pub trait Cursor: CursorCore + Parsable { }
+pub trait Peekable: CursorCore {
+  fn peekn(&self, n: usize) -> Option<Vec<TokenTree>> {
+    let mut cursor = self.clone();
+    let mut result = Vec::new();
+    for _ in 0..n {
+      let (t, cursor_next) = cursor.token()?;
+      result.push(t);
+      cursor.seek(cursor_next);
+    }
+    Some(result)
+  }
+
+  fn peek2(&self) -> Option<(TokenTree, TokenTree)> {
+    let mut result = self.peekn(2)?;
+    Some((result.remove(0), result.remove(0)))
+  }
+}
+
+pub trait Cursor: CursorCore + Peekable + Parsable { }
+impl<T: CursorCore> Peekable for T { }
 impl<T: CursorCore + Parsable> Cursor for T { }
 
 impl Spanable for syn::buffer::Cursor<'_> {
@@ -291,8 +310,8 @@ impl<Tag: XmlTag, Ident: Parse, Child: Parse> Parse for MetaXml<Tag, Ident, Chil
       T0 /* (<) */, T1 /* < (ident) */,
       A0(IdentToken, Attrs<Ident>) /* <ident (attr, /, >) */,
       A1(IdentToken, Attrs<Ident>, Ident) /* <ident attr (=) */,
-      A2(IdentToken, Attrs<Ident>, Ident) /* <ident attr= (string) */,
-      C0(IdentToken, Attrs<Ident>, Vec<Child>) /* <ident attr=string> (<, {...}) */,
+      A2(IdentToken, Attrs<Ident>, Ident) /* <ident attr= (string) => A0 */,
+      C0(IdentToken, Attrs<Ident>, Vec<Child>) /* <ident attr=string> (</, {...}) => E0,C0 */,
       S1(IdentToken, Attrs<Ident>) /* <ident / (>) */,
       S2(IdentToken, Attrs<Ident>) /* <ident /> */,
       E0(IdentToken, Attrs<Ident>, Vec<Child>) /* ... (<) */,
@@ -310,7 +329,7 @@ impl<Tag: XmlTag, Ident: Parse, Child: Parse> Parse for MetaXml<Tag, Ident, Chil
           A0(_, _) => "expect attr, /, > at state A0",
           A1(_, _, _) => "expect = at state A1",
           A2(_, _, _) => "expect string at state A2",
-          C0(_, _, _) => "expect child at state C0",
+          C0(_, _, _) => "expect </, child at state C0",
           S1(_, _) => "expect > at state S1",
           S2(_, _) => "expect nothing at state S2",
           E0(_, _, _) => "expect < state E0",
@@ -371,7 +390,7 @@ impl<Tag: XmlTag, Ident: Parse, Child: Parse> Parse for MetaXml<Tag, Ident, Chil
             _ => return error(cursor.span(), state.expect()),
           }
         },
-        _ => return error(cursor.span(), state.expect())
+        _ => return error(cursor.span(), state.expect()),
       };
       cursor.seek(cursor_next);
 
@@ -385,9 +404,15 @@ impl<Tag: XmlTag, Ident: Parse, Child: Parse> Parse for MetaXml<Tag, Ident, Chil
           }
         },
         State::C0(i, a, mut v) => {
-          while let Ok((child, cursor_next)) = Child::parse(cursor.clone(), ctx.as_ctx()) {
-            cursor.seek(cursor_next);
-            v.push(child);
+          loop {
+            match cursor.peek2() {
+              Some((TokenTree::Punct(t1), TokenTree::Punct(t2))) if t1.as_char() == '<' && t2.as_char() == '/' => break,
+              _ => {
+                let (child, cursor_next) = Child::parse(cursor.clone(), ctx.as_ctx())?;
+                cursor.seek(cursor_next);
+                v.push(child);
+              }
+            }
           }
           State::E0(i, a, v)
         },

@@ -82,10 +82,13 @@ pub enum MustacheItem {
   P(IdentToken),
 }
 impl MustacheItem {
-  pub fn from(stream: TokenStream) -> Vec<Self> {
+  pub fn from(stream: TokenStream, span: Option<Span>) -> Vec<Self> {
     let mut result = Vec::new();
     let mut stream = stream.into_iter();
-    while let Some(i) = stream.next() {
+    while let Some(mut i) = stream.next() {
+      if let Some(span) = span {
+        i.set_span(span);
+      }
       match i {
         TokenTree::Punct(ref t) if t.as_char() == '$' => {
           match stream.next() {
@@ -95,7 +98,7 @@ impl MustacheItem {
           }
         },
         TokenTree::Group(t) => {
-          result.push(MustacheItem::G(t.delimiter(), Self::from(t.stream()), t.span()))
+          result.push(MustacheItem::G(t.delimiter(), Self::from(t.stream(), span), t.span()))
         }
         _ => result.push(MustacheItem::K(i))
       };
@@ -111,10 +114,9 @@ pub struct Mustache {
 
 impl Mustache {
   pub fn parse_lit(lit: &Literal) -> Result<Self> {
-    let span = lit.span();
-    let v = lit.value_str().ok_or_else(|| syn::Error::new(span, "parse_lit"))?;
-    let stream = v.parse::<TokenStream>().map_err(|_| syn::Error::new(span, "parse TokenStream"))?;
-    Ok(Self { prefix: MustachePrefix::None, content: MustacheItem::from(stream) })
+    let v = lit.value_str()?;
+    let stream = v.parse::<TokenStream>().map_err(|_| syn::Error::new(lit.span(), "parse TokenStream"))?;
+    Ok(Self { prefix: MustachePrefix::None, content: MustacheItem::from(stream, Some(lit.span)) })
   }
 }
 
@@ -309,7 +311,7 @@ impl Parse for Mustache {
         return error(t.span(), "unexpected token");
       }
       cursor.seek(cursor_next);
-      return Ok((Mustache { prefix, content: MustacheItem::from(content) }, cursor.tell()))
+      return Ok((Mustache { prefix, content: MustacheItem::from(content, None) }, cursor.tell()))
     }
     error(cursor.span(), "expect group")
   }
@@ -393,12 +395,11 @@ impl Parse for Child {
   fn parse<C: Cursor>(cursor: C, ctx: &mut Self::Context) -> Result<(Self, C::Marker)> {
     if let Ok((k, cursor_next)) = Comment::parse(cursor.clone(), ctx.as_ctx()) {
       Ok((Child::C(k), cursor_next))
-    } else if let Ok((k, cursor_next)) = TemplateInner::parse(cursor.clone(), ctx) {
-      Ok((Child::T(k), cursor_next))
     } else if let Ok((k, cursor_next)) = Mustache::parse(cursor.clone(), ctx.as_ctx()) {
       Ok((Child::M(k), cursor_next))
     } else {
-      error(cursor.span(), "not valid child")
+      let (k, cursor_next) = TemplateInner::parse(cursor.clone(), ctx)?;
+      Ok((Child::T(k), cursor_next))
     }
   }
 }

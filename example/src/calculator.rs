@@ -1,5 +1,8 @@
 use orbvue::build_template;
 
+pub const TITLE: &str = "OrbTk - Calculator example";
+pub const WINDOW_SIZE: (f64, f64) = (212.0, 336.0);
+
 build_template!{
 <template name="MainView" width:="212.0" height:="336.0" text="">
   <Grid rows$="72.0 *">

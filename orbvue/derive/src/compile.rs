@@ -6,7 +6,7 @@ use crate::template::*;
 
 use proc_macro2::{TokenStream, Ident, Span, TokenTree};
 
-type DollarFn = dyn Fn(&Ident, &str) -> Result<Vec<(Ident, TokenStream)>, String> + Send + Sync;
+type DollarFn = dyn Fn(&Ident, &str) -> syn::Result<Vec<(Ident, TokenStream)>> + Send + Sync;
 #[derive(Default, Clone)]
 pub struct Context {
   pub dollar: HashMap<String, HashMap<String, Arc<DollarFn>>>,
@@ -44,13 +44,13 @@ fn split_tokens<T: std::str::FromStr + quote::ToTokens>(s: &str) -> Vec<TokenStr
   result
 }
 
-pub fn dollar_grid_rows(k: &Ident, s: &str) -> Result<Vec<(Ident, TokenStream)>, String> {
+pub fn dollar_grid_rows(k: &Ident, s: &str) -> syn::Result<Vec<(Ident, TokenStream)>> {
   let value = split_tokens::<f64>(s);
   Ok(vec![(k.clone(), quote! {
     Rows::create()#(.row(#value))*.build()
   })])
 }
-pub fn dollar_grid_columns(k: &Ident, s: &str) -> Result<Vec<(Ident, TokenStream)>, String> {
+pub fn dollar_grid_columns(k: &Ident, s: &str) -> syn::Result<Vec<(Ident, TokenStream)>> {
   let value = split_tokens::<f64>(s);
   Ok(vec![(k.clone(), quote! {
     Columns::create()#(.column(#value))*.build()
@@ -103,14 +103,24 @@ pub fn compile<Tag: XmlTag>(t: &TemplateXml<Tag>, ctx: &Context) -> TokenStream 
     };
     let value = match &k.suffix {
       Some(Component::Colon) => {
-        let m = Mustache::parse_lit(v).unwrap();
-        let v = m.apply(ctx);
-        quote! { #v }
+        match Mustache::parse_lit(v) {
+          Ok(m) => {
+            let v = m.apply(ctx);
+            quote! { #v }
+          },
+          Err(e) => e.to_compile_error(),
+        }
       },
       Some(Component::Dollar) => {
-        let s = v.value_str().unwrap();
+        let s = match v.value_str() {
+          Ok(s) => s,
+          Err(e) => return e.to_compile_error(),
+        };
         let f= ctx.get_dollar(&name.to_string(), &key.to_string()).ok_or_else(|| format!("{}::{}", name, key)).expect("get_dollar");
-        let v = f(key, &s).unwrap().into_iter().map(|(k, v)| quote! { .#k(#v) }).collect::<Vec<_>>();
+        let v = match f(key, &s) {
+          Ok(v) => v.into_iter().map(|(k, v)| quote! { .#k(#v) }).collect::<Vec<_>>(),
+          Err(e) => return e.to_compile_error(),
+        };
         return quote! { #(#v)* }
       },
       None => { let v = &v.lit; quote!{ #v } },
