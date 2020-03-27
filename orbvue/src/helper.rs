@@ -8,16 +8,16 @@ pub trait ComponentTrait: 'static {
   type Event;
 }
 
-// whole these Props, State, Slots, Event as a State in the scope of orbtk
+/// whole these Props, State, Slots, Event as a State in the scope of orbtk
 #[derive(Default)]
 pub struct Component<C: ComponentTrait> {
-  // $props in template
+  /// $props in template
   props: C::Props,
-  // $state in template
+  /// $state in template
   state: C::State,
-  // v-on/@ in template
+  /// v-on/@ in template
   slots: C::Slots,
-  // action in document of orbtk
+  /// action in document of orbtk
   events: VecDeque<C::Event>,
 }
 

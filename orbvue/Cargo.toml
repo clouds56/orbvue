@@ -9,6 +9,8 @@ edition = "2018"
 [dependencies]
 orbtk = { git = "https://github.com/redox-os/orbtk", branch = "develop" }
 orbvue-derive = { path = "./derive", optional = true }
+parse-generics-shim = "*"
+paste = "*"
 
 [dev-dependencies]
 orbvue-derive = { path = "./derive" }
