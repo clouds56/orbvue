@@ -110,13 +110,8 @@ impl AttrValue {
   pub fn value_str(&self) -> Option<String> {
     use syn::*;
     if self.path.is_ident("orbvue") {
-      match self.meta {
-        Meta::NameValue(MetaNameValue { lit: Lit::Str(ref lit_str), .. }) => return Some(lit_str.value()),
-        // Meta::List(MetaList { nested, .. }) if list => {
-        //   let nested = quote! { #nested };
-        //   name = Some(nested.to_string());
-        // },
-        _ => (),
+      if let Meta::NameValue(MetaNameValue { lit: Lit::Str(ref lit_str), .. }) = self.meta {
+        return Some(lit_str.value())
       }
     }
     None
@@ -127,7 +122,7 @@ fn pop_attrs(attrs: Vec<syn::Attribute>) -> (Vec<syn::Attribute>, Option<AttrVal
   let mut attrs2 = Vec::new();
   let mut result = Vec::new();
   for attr in attrs {
-    if attr.path.segments.first().map(|s| &s.ident.to_string() == "orbvue") == Some(true) {
+    if attr.path.segments.first().map(|s| s.ident == "orbvue") == Some(true) {
       let meta = attr.parse_meta().expect("parse_meta");
       result.push(AttrValue { style: attr.style, path: attr.path, meta })
     } else {
@@ -209,17 +204,17 @@ impl<'a> ItemFnVisitor<'a> {
         FnArg::Receiver(mut i) => {
           let (attrs, value) = pop_attrs(i.attrs);
           i.attrs = attrs;
-          if value.is_some() {
-            ctx.set_name(&value.unwrap().value_str().expect("parse name failed in attr"), "self".to_string());
+          if let Some(value) = value {
+            ctx.set_name(&value.value_str().expect("parse name failed in attr"), "self".to_string());
           }
           FnArg::Receiver(i)
         },
         FnArg::Typed(mut i) => {
           let (attrs, value) = pop_attrs(i.attrs);
           i.attrs = attrs;
-          if value.is_some() {
+          if let Some(value) = value {
             if let Pat::Ident(v) = i.pat.as_ref() {
-              ctx.set_name(&value.unwrap().value_str().expect("parse name failed in attr"), v.ident.to_string());
+              ctx.set_name(&value.value_str().expect("parse name failed in attr"), v.ident.to_string());
             }
           }
           FnArg::Typed(i)

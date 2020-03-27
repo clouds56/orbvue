@@ -32,7 +32,7 @@ impl Context {
 
 fn split_tokens<T: std::str::FromStr + quote::ToTokens>(s: &str) -> Vec<TokenStream> {
   let mut result = vec![];
-  for s in s.split(" ") {
+  for s in s.split(' ') {
     if s.is_empty() { continue };
     let v = if let Ok(v) = s.parse::<T>() {
       quote!(#v)
@@ -72,7 +72,7 @@ impl Mustache {
       MustacheItem::K(k) => k.clone(),
       MustacheItem::G(d, v, span) => {
         use proc_macro2::Group;
-        let v = v.into_iter().map(|i| Mustache::apply_item(i, ctx)).collect();
+        let v = v.iter().map(|i| Mustache::apply_item(i, ctx)).collect();
         let mut g = Group::new(*d, v);
         g.set_span(*span);
         g.into()
@@ -114,7 +114,7 @@ pub fn compile<Tag: XmlTag>(t: &TemplateXml<Tag>, ctx: &Context) -> TokenStream 
         return quote! { #(#v)* }
       },
       None => { let v = &v.lit; quote!{ #v } },
-      t @ _ => panic!("unexpected suffix component {:?}", t),
+      t => panic!("unexpected suffix component {:?}", t),
     };
     quote! {
       .#key(#value)

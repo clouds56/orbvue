@@ -190,7 +190,7 @@ macro_rules! parse_context {
       fn as_ctx(&mut self) -> &mut Self { self }
     }
     impl$(<$($t)*>)? AsParseContext<UnitContext> for $name $($t2)* {
-      fn as_ctx(&mut self) -> &mut UnitContext { unsafe { std::mem::transmute(self) } }
+      fn as_ctx(&mut self) -> &mut UnitContext { unsafe { &mut *(self as *mut Self as *mut ()) } }
     }
   };
   ($name:ident) => {
@@ -247,8 +247,8 @@ impl Parse for Literal {
     if let Some((token, cursor_next)) = cursor.token() {
       let t = match token {
         TokenTree::Literal(t) => Self::Lit(t),
-        TokenTree::Ident(t) if &t.to_string() == "true" => Self::True(t),
-        TokenTree::Ident(t) if &t.to_string() == "false" => Self::False(t),
+        TokenTree::Ident(t) if t == "true" => Self::True(t),
+        TokenTree::Ident(t) if t == "false" => Self::False(t),
         _ => return error(cursor.span(), "not a literal"),
       };
       return Ok((t, cursor_next))
@@ -262,7 +262,7 @@ pub trait XmlTag {
   fn name() -> Option<&'static str> { None }
   fn check(name: &IdentToken) -> Result<()> {
     match Self::name() {
-      Some(tag) if tag != &name.to_string() =>
+      Some(tag) if name != tag =>
         error(name.span(), "wrong tag name"),
       _ => Ok(()),
     }
@@ -361,13 +361,13 @@ impl<Tag: XmlTag, Ident: Parse, Child: Parse> Parse for MetaXml<Tag, Ident, Chil
         },
         TokenTree::Ident(t) => {
           match state {
-            State::A2(i, mut a, k) if &t.to_string() == "true" => { a.push((k, Literal::True(t.clone()))); State::A0(i, a) },
-            State::A2(i, mut a, k) if &t.to_string() == "false" => { a.push((k, Literal::False(t.clone()))); State::A0(i, a) },
+            State::A2(i, mut a, k) if t == "true" => { a.push((k, Literal::True(t.clone()))); State::A0(i, a) },
+            State::A2(i, mut a, k) if t == "false" => { a.push((k, Literal::False(t.clone()))); State::A0(i, a) },
             State::T1 => {
               Tag::check(&t)?;
               State::A0(t.clone(), vec![])
             },
-            State::E2(i, a, v) if t.to_string() == i.to_string() => State::E3(i, a, v),
+            State::E2(i, a, v) if t == i => State::E3(i, a, v),
             _ => return error(cursor.span(), state.expect()),
           }
         },

@@ -34,6 +34,8 @@ fn build_template_raw(input: TokenStream2) -> Result<TokenStream2> {
     quote!{ pub const CSS: &'static str = #css; }
   });
 
+  drop(ctx);
+
   let result = quote! {
     mod __orbvue__build__ {
       use orbtk::prelude::*;

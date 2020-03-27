@@ -241,7 +241,7 @@ impl Parse for Ident {
         }
         TokenTree::Ident(i) => {
           match state {
-            State::P0 if i.to_string() == "v".to_string() => State::V1(i.clone()),
+            State::P0 if i == "v" => State::V1(i.clone()),
             State::P0 => State::S0(None, IdentComponent::I(i.clone())),
             State::V2 => State::V3(i.clone()),
             State::V4(j) => State::S0(Some(IdentComponent::V(j)), IdentComponent::I(i.clone())),
@@ -284,7 +284,7 @@ fn parse_ident() {
 impl Parse for Mustache {
   type Context = MustacheContext;
   fn parse<C: Cursor>(mut cursor: C, _: &mut Self::Context) -> Result<(Self, C::Marker)> {
-    while let Some((TokenTree::Group(t), cursor_next)) = cursor.token() {
+    if let Some((TokenTree::Group(t), cursor_next)) = cursor.token() {
       let mut inner = t.stream().into_iter();
       if t.delimiter() != Delimiter::Brace {
         return error(cursor.span(), "expect brace");
@@ -311,7 +311,7 @@ impl Parse for Mustache {
       cursor.seek(cursor_next);
       return Ok((Mustache { prefix, content: MustacheItem::from(content) }, cursor.tell()))
     }
-    return error(cursor.span(), "expect group")
+    error(cursor.span(), "expect group")
   }
 }
 
@@ -376,7 +376,7 @@ impl Parse for Comment {
       }
       last = Some(current);
     }
-    return error(cursor.span(), "expect group")
+    error(cursor.span(), "expect group")
   }
 }
 
@@ -410,7 +410,7 @@ pub fn parse_litstr(s: String) -> Option<String> {
     E1 /* \ */, E2 /* \u */, E3(String) /* \u{ */, Complete(char),
   }
   fn parse_escape(iter: &mut std::str::Chars<'_>, mut state: Escape) -> std::result::Result<char, &'static str> {
-    while let Some(i) = iter.next() {
+    for i in iter {
       state = match (state, i) {
         (Escape::E1, 'u') => Escape::E2,
         (Escape::E2, '{') => Escape::E3(String::new()),
