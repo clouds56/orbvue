@@ -11,7 +11,7 @@ use syn::parse::Result;
 pub use syn::visit_mut::VisitMut;
 
 pub struct Context {
-  lang: String,
+  pub lang: String,
 }
 impl Default for Context {
   fn default() -> Self {
@@ -63,21 +63,13 @@ pub enum Child {
 impl Parse for Child {
   type Context = Context;
   fn parse<C: Cursor>(cursor: C, ctx: &mut Self::Context) -> Result<(Self, C::Marker)> {
-    if let Some((TokenTree::Punct(t), _)) = cursor.token() {
-      if t.as_char() == '<' {
-        return error(cursor.span(), "child end");
-      }
-    }
-    if let Ok((k, cursor_next)) = RustItem::parse(cursor.clone(), ctx.as_ctx()) {
-      Ok((Child::I(k), cursor_next))
-    } else {
-      error(cursor.span(), "not valid child")
-    }
+    let (k, cursor_next) = RustItem::parse(cursor, ctx.as_ctx())?;
+    Ok((Child::I(k), cursor_next))
   }
 }
 
 #[cfg(test)]
-const SCRIPT: &'static str = r##"
+const SCRIPT: &str = r##"
 <script lang="rs">
 fn template(self, #[orbvue="id"] id: Entity, #[orbvue="ctx"] ctx: &mut BuildContext) -> Self {
   #[orbvue="expr"]
@@ -231,7 +223,7 @@ impl<'a> ItemFnVisitor<'a> {
 
 #[test]
 fn test_gen_script() {
-  const TEMPLATE: &'static str = r##"<template name="hello" />"##;
+  const TEMPLATE: &str = r##"<template name="hello" />"##;
   let s = parse_str::<Script>(SCRIPT).unwrap();
   let t = parse_str::<Template>(TEMPLATE).unwrap();
   let mut visitor = ItemFnVisitor::new(&t, CompileContext::new());

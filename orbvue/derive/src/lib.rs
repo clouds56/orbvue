@@ -7,6 +7,7 @@ mod compile;
 mod template;
 mod script;
 mod css;
+mod utils;
 
 use common::*;
 use compile::Context;
@@ -53,4 +54,14 @@ pub fn build_template(input: TokenStream) -> TokenStream {
     Ok(i) => i,
     Err(e) => e.to_compile_error(),
   }.into()
+}
+
+#[proc_macro]
+pub fn orbvue_apply(input: TokenStream) -> TokenStream {
+  let mut model_sort = utils::functors::model_sort;
+  let mut condition = utils::functors::condition;
+  let mut functors: std::collections::HashMap<String, Box<utils::Functor>> = std::collections::HashMap::new();
+  functors.insert("model_sort".to_string(), Box::new(&mut model_sort));
+  functors.insert("condition".to_string(), Box::new(&mut condition));
+  utils::apply_brace(input.into(), &mut functors).into()
 }

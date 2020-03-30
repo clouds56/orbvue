@@ -4,8 +4,9 @@ use orbtk::theme::DEFAULT_THEME_CSS;
 pub mod calculator;
 pub mod clear;
 pub mod widgets;
+pub mod props;
 
-use widgets::*;
+use props::*;
 
 fn get_theme() -> ThemeValue {
     ThemeValue::create_from_css(DEFAULT_THEME_CSS)

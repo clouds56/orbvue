@@ -51,7 +51,7 @@ enum Action {
 }
 
 #[derive(Default, AsAny)]
-pub struct MainViewState {
+struct MainViewState {
   input: String,
   operator: Option<char>,
   left_side: Option<f64>,

@@ -8,7 +8,7 @@ use proc_macro2::{
 use syn::parse::Result;
 
 pub struct Context {
-  scoped: bool,
+  pub scoped: bool,
 }
 impl Default for Context {
   fn default() -> Self {
@@ -108,7 +108,7 @@ impl Parse for Child {
 }
 
 #[cfg(test)]
-const CSS: &'static str = r##"
+const CSS: &str = r##"
 <css scoped=true>r#"
 .header {
   background: #444e55;

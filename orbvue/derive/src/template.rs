@@ -8,8 +8,8 @@ use proc_macro2::{
 use syn::parse::Result;
 
 pub struct MustacheContext {
-  prefix: String,
-  suffix: String,
+  pub prefix: String,
+  pub suffix: String,
 }
 impl Default for MustacheContext {
   fn default() -> Self {
@@ -398,7 +398,7 @@ impl Parse for Child {
     } else if let Ok((k, cursor_next)) = Mustache::parse(cursor.clone(), ctx.as_ctx()) {
       Ok((Child::M(k), cursor_next))
     } else {
-      let (k, cursor_next) = TemplateInner::parse(cursor.clone(), ctx)?;
+      let (k, cursor_next) = TemplateInner::parse(cursor, ctx)?;
       Ok((Child::T(k), cursor_next))
     }
   }
@@ -483,7 +483,7 @@ pub fn parse_litstr(s: String) -> Option<String> {
 }
 
 #[cfg(test)]
-const TEMPLATE: &'static str = r##"
+const TEMPLATE: &str = r##"
 <template>
   <Grid :a="" b:="100" c$="* *" v-if:b="" @c=r#""c""# >
     <Text v-for="x in y" key:="x.id" v-bind:[var]="value" />

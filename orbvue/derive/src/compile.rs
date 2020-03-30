@@ -156,7 +156,7 @@ pub fn compile<Tag: XmlTag>(t: &TemplateXml<Tag>, ctx: &Context) -> TokenStream 
 }
 
 #[cfg(test)]
-pub const TEMPLATE: &'static str = r##"
+pub const TEMPLATE: &str = r##"
 <template name="MainView" width:="212.0" height:="336.0" text="">
   <Grid rows$="72.0 *">
     <Container padding:="8.0" element="container" class="header" attach:="Grid::row(0)">
@@ -198,7 +198,7 @@ pub const TEMPLATE: &'static str = r##"
   "##;
 
 #[cfg(test)]
-const SCRIPT: &'static str = r##"
+const SCRIPT: &str = r##"
 <script lang="rs">
 fn generate_digit_button(
   ctx: &mut BuildContext,

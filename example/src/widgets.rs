@@ -82,7 +82,7 @@ enum Action {
 }
 
 #[derive(AsAny)]
-pub struct MainViewState {
+struct MainViewState {
   action: Option<Action>,
 }
 
