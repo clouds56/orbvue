@@ -1,16 +1,20 @@
 use proc_macro2::{TokenTree, TokenStream, Delimiter, Group};
 
 fn check_lead(v: &[TokenTree]) -> Option<String> {
-  if v.len() != 3 { return None; }
+  if v.len() != 4 { return None; }
   match &v[0] {
     TokenTree::Punct(i) if i.as_char() == '<' => (),
     _ => return None,
   }
-  match &v[2] {
+  match &v[1] {
+    TokenTree::Punct(i) if i.as_char() == ':' => (),
+    _ => return None,
+  }
+  match &v[3] {
     TokenTree::Punct(i) if i.as_char() == '>' => (),
     _ => return None,
   }
-  match &v[1] {
+  match &v[2] {
     TokenTree::Ident(i) => Some(i.to_string()),
     _ => None,
   }
@@ -32,7 +36,7 @@ pub fn apply_brace(input: TokenStream, functors: &std::collections::HashMap<Stri
         let mut stream = g.stream().into_iter().peekable();
         match stream.peek() {
           Some(TokenTree::Punct(c)) if c.as_char() == '<' => {
-            let ahead: Vec<_> = (0..3).filter_map(|_| stream.next()).collect();
+            let ahead: Vec<_> = (0..4).filter_map(|_| stream.next()).collect();
             if let Some(f) = check_lead(&ahead).and_then(|s| functors.get(&s)) {
               let stream = apply_brace(stream.collect(), functors);
               let stream = match (*f)(stream) {
@@ -67,7 +71,7 @@ pub fn apply_brace(input: TokenStream, functors: &std::collections::HashMap<Stri
 
 mod model {
   use syn::*;
-  use crate::Spanable;
+  use crate::Spannable;
   use syn::parse::{Parse, ParseStream};
   use syn::punctuated::{Punctuated, Pair};
   use proc_macro2::{TokenStream, Span, TokenTree, Delimiter};
@@ -75,7 +79,7 @@ mod model {
 
   #[derive(Clone)]
   pub struct Prop(pub Ident, pub Token![:], pub Type, pub Option<TokenTree>);
-  impl Spanable for Prop {
+  impl Spannable for Prop {
     fn span(&self) -> Span { self.0.span() }
   }
   impl Parse for Prop {
@@ -107,7 +111,7 @@ mod model {
     pub deps_token: token::Bracket,
     pub deps: Punctuated<Ident, Token![,]>,
   }
-  impl Spanable for Compute {
+  impl Spannable for Compute {
     fn span(&self) -> Span { self.ident.span() }
   }
   impl Parse for Compute {
@@ -232,7 +236,7 @@ mod model {
       }
       Ok(v)
     }
-    fn pair_to_tuple<T: Spanable + Clone>(pair: Pair<&T, &Token![,]>) -> (T, Token![,]) {
+    fn pair_to_tuple<T: Spannable + Clone>(pair: Pair<&T, &Token![,]>) -> (T, Token![,]) {
       match pair {
         Pair::Punctuated(i, v) => { (i.clone(), *v) },
         Pair::End(i) => { (i.clone(), token::Comma { spans: [i.span()] }) }

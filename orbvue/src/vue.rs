@@ -19,13 +19,11 @@ pub trait AddComponent: Sized {
 macro_rules! vue {
   ($name:ident, $model:ty, $widget:ty) => {
     pub struct $name;
-    $crate::orbvue_apply!{
     impl $crate::vue::Vue for $name {
       type Widget = $widget;
       fn create_model() -> $crate::compute::BuildModel<Self> {
-        {<ident> create_ $model}()
+        <$model>::create()
       }
-    }
     }
     impl $crate::vue::AddComponent for $widget {
       fn add_shared_component(mut self, typeid: std::any::TypeId, key: String, source_key: String, source_id: $crate::vue::Entity) -> Self {

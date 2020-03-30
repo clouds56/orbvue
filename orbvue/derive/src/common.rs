@@ -94,15 +94,15 @@ impl std::fmt::Debug for Literal {
   }
 }
 
-pub trait Spanable {
+pub trait Spannable {
   fn span(&self) -> Span;
 }
 pub trait Parsable: CursorCore {
   fn parse<T: syn::parse::Parse>(&self) -> Result<(T, Self::Marker)>;
 }
 
-pub trait CursorCore: Spanable + Clone {
-  type Marker: Spanable;
+pub trait CursorCore: Spannable + Clone {
+  type Marker: Spannable;
   // note every const reference should not mutate inner state especially `token`
   fn token(&self) -> Option<(TokenTree, Self::Marker)>;
   fn seek(&mut self, dst: Self::Marker);
@@ -131,7 +131,7 @@ pub trait Cursor: CursorCore + Peekable + Parsable { }
 impl<T: CursorCore> Peekable for T { }
 impl<T: CursorCore + Parsable> Cursor for T { }
 
-impl Spanable for syn::buffer::Cursor<'_> {
+impl Spannable for syn::buffer::Cursor<'_> {
   fn span(&self) -> Span { Self::span(*self) }
 }
 
@@ -167,7 +167,7 @@ impl Clone for ParseStream<'_> {
   }
 }
 
-impl Spanable for ParseStream<'_> {
+impl Spannable for ParseStream<'_> {
   fn span(&self) -> Span { self.0.span() }
 }
 impl Parsable for ParseStream<'_> {

@@ -163,13 +163,6 @@ impl<M: Vue> BuildModel<M> {
     self.order.push(name);
   }
 
-  pub unsafe fn add_prop_unchecked(&mut self, prop: ComputedProp) {
-    let name = prop.name;
-    assert!(!self.props.contains_key(&name), "you should not add computed props multiple times: {:?}", name);
-    // TODO: fix downstream here?
-    self.props.insert(name, prop);
-  }
-
   pub fn build_template(&self, mut this: M::Widget, id: Entity) -> M::Widget {
     for name in &self.order {
       this = self.props.get(name).unwrap().build_template(this, id)
@@ -216,9 +209,9 @@ macro_rules! prop_object {
   };
   (@stage_impl $name:ident: $ty:ty [@expr {$($expr:tt)*} @example {$($example:tt)*}]) => { $crate::orbvue_apply!{
     #[allow(non_camel_case_types)]
-    pub struct {<ident> prop_ $name};
-    impl {<ident> prop_ $name} {
-      pub const NAME: &'static str = {<stringify> $name};
+    pub struct {<:ident> prop_ $name};
+    impl {<:ident> prop_ $name} {
+      pub const NAME: &'static str = {<:stringify> $name};
       pub fn init() -> $ty {
         $($expr)*
       }
@@ -242,7 +235,7 @@ macro_rules! prop_object {
         vec![]
       }
     }
-    into_computed_prop!({<ident> prop_ $name});
+    into_computed_prop!({<:ident> prop_ $name});
   } };
   ($($tt:tt)*) => { compile_error!(concat!("macro_error prop_object!: ", stringify!($($tt)*))); };
 }
@@ -253,9 +246,9 @@ macro_rules! state_object {
   };
   ($name:ident: $ty:ty = $expr:expr) => { $crate::orbvue_apply!{
     #[allow(non_camel_case_types)]
-    pub struct {<ident> state_ $name};
-    impl {<ident> state_ $name} {
-      pub const NAME: &'static str = {<stringify> $name};
+    pub struct {<:ident> state_ $name};
+    impl {<:ident> state_ $name} {
+      pub const NAME: &'static str = {<:stringify> $name};
       pub fn init() -> $ty {
         $expr
       }
@@ -273,16 +266,16 @@ macro_rules! state_object {
         vec![]
       }
     }
-    into_computed_prop!({<ident> state_ $name});
+    into_computed_prop!({<:ident> state_ $name});
   } };
 }
 #[macro_export]
 macro_rules! compute_object {
   ($name:ident [$($deps:ident: &$depty:ty),* $(,)?] -> $ty:ty { $($tt:tt)* }) => { $crate::orbvue_apply!{
     #[allow(non_camel_case_types)]
-    pub struct {<ident> compute_ $name};
-    impl {<ident> compute_ $name} {
-      pub const NAME: &'static str = {<stringify> $name};
+    pub struct {<:ident> compute_ $name};
+    impl {<:ident> compute_ $name} {
+      pub const NAME: &'static str = {<:stringify> $name};
       #[allow(clippy::ptr_arg)]
       pub fn call($($deps:&$depty),*) -> $ty {
         $($tt)*
@@ -297,10 +290,10 @@ macro_rules! compute_object {
       fn wrapper(store: &mut $crate::vue::StringComponentStore, id: $crate::vue::Entity) -> bool {
         use $crate::compute::{ComputedKey, ComputeHandler};
         $(
-          let $deps = ComputeHandler::get::<$depty>(store, ComputedKey({<stringify> $deps}), id);
+          let $deps = ComputeHandler::get::<$depty>(store, ComputedKey({<:stringify> $deps}), id);
         )*
-        let {<ident> new_ $name} = Self::call($($deps),*);
-        ComputeHandler::set(store, ComputedKey(Self::NAME), id, {<ident> new_ $name}, Self::replace)
+        let {<:ident> new_ $name} = Self::call($($deps),*);
+        ComputeHandler::set(store, ComputedKey(Self::NAME), id, {<:ident> new_ $name}, Self::replace)
       }
       pub fn typeid() -> ::core::any::TypeId {
         ::core::any::TypeId::of::<$ty>()
@@ -309,11 +302,11 @@ macro_rules! compute_object {
         $crate::compute::ComputeHandler::from(Self::wrapper).into()
       }
       pub fn deps() -> Vec<$crate::compute::ComputedKey> {
-        let deps: Vec<&'static str> = vec![$({<stringify> $deps}),*];
+        let deps: Vec<&'static str> = vec![$({<:stringify> $deps}),*];
         $crate::compute::ComputedKey::from_vec(deps)
       }
     }
-    $crate::into_computed_prop!({<ident> compute_ $name});
+    $crate::into_computed_prop!({<:ident> compute_ $name});
   } };
 }
 
@@ -329,7 +322,7 @@ macro_rules! model_apply {
     $(@sorted $tt:tt)?
   ]) => { $crate::orbvue_apply!{
     #[allow(non_camel_case_types)]
-    struct {<ident> test_ $name _struct} {
+    struct {<:ident> test_ $name _struct} {
       $($name1:$ty1,)* $($name2:$ty2,)* $($name3:$ty3,)*
     }
   } };
@@ -343,14 +336,14 @@ macro_rules! model_apply {
   ]) => { $crate::orbvue_apply!{
     #[allow(non_snake_case, clippy::let_unit_value)]
     #[test]
-    {<condition>
-      {#[should_panic] fn {<ident> test_ $name _init__should_panic}()}
-      {fn {<ident> test_ $name _init}()}
+    {<:condition>
+      {#[should_panic] fn {<:ident> test_ $name _init__should_panic}()}
+      {fn {<:ident> test_ $name _init}()}
       $($($uninit)?)*
     } {
-      $(let $name1:$ty1 = {<ident> prop_ $name1}::example();)*
-      $(let $name2:$ty2 = {<ident> state_ $name2}::init();)*
-      $(let $name3:$ty3 = {<ident> compute_ $name3}::call($(&$dep3),*);)*
+      $(let $name1:$ty1 = {<:ident> prop_ $name1}::example();)*
+      $(let $name2:$ty2 = {<:ident> state_ $name2}::init();)*
+      $(let $name3:$ty3 = {<:ident> compute_ $name3}::call($(&$dep3),*);)*
     }
   } };
   (@build_model [
@@ -361,13 +354,16 @@ macro_rules! model_apply {
     @sorted $tt:tt
     $(@init_panic $tpanic:tt)?
   ]) => { $crate::orbvue_apply!{
-    pub fn create<M: $crate::vue::Vue>() -> $crate::compute::BuildModel<M> {
-      #[allow(unused_mut)]
-      let mut model = $crate::compute::BuildModel::default();
-      $(model.add_prop({<ident> prop_ $name1}.into());)*
-      $(model.add_prop({<ident> state_ $name2}.into());)*
-      $(model.add_prop({<ident> compute_ $name3}.into());)*
-      model
+    pub struct $name {}
+    impl $name {
+      pub fn create<M: $crate::vue::Vue>() -> $crate::compute::BuildModel<M> {
+        #[allow(unused_mut)]
+        let mut model = $crate::compute::BuildModel::default();
+        $(model.add_prop({<:ident> prop_ $name1}.into());)*
+        $(model.add_prop({<:ident> state_ $name2}.into());)*
+        $(model.add_prop({<:ident> compute_ $name3}.into());)*
+        model
+      }
     }
   } };
   (@$($tt:tt)*) => { compile_error!(concat!("macro_error model_apply!: @", stringify!($($tt)*))); };
@@ -380,13 +376,13 @@ macro_rules! model {
   (@stage0_impl[@name $name:ident] $($tt:tt)*) => {
     $crate::orbvue_apply! {
       #[allow(dead_code, non_snake_case, non_camel_case_types, unused_imports, unused_variables)]
-      mod {<ident> __model_ $name} {
+      mod {<:ident> __model_ $name} {
         use super::*;
         use $crate::macros::*;
-        model!(@stage1[@name Model] $($tt)*);
+        model!(@stage1[@name $name] $($tt)*);
       }
       #[allow(unused_imports)]
-      use {<ident> __model_ $name}::create as {<ident> create_ $name};
+      use {<:ident> __model_ $name}::$name;
     }
   };
   (@stage1 $r:tt, props: { $($ti:tt)* } $($tt:tt)*) => {
@@ -408,7 +404,7 @@ macro_rules! model {
   (@stage1_impl[$($r:tt)*] @props{ $($name:ident($($to:tt)?):$ty:ty $(= $expr:expr)?),* $(,)? } $($tt:tt)*) => {
     $($crate::macros::prop_object!($name$($to)?:$ty $(= $expr)?);)*
     $crate::orbvue_apply!{
-      model!(@stage2[$($r)* @props{ $($name:$ty {{<condition> {@uninit !} {} $($to)?}},)* }] $($tt)*);
+      model!(@stage2[$($r)* @props{ $($name:$ty {{<:condition> {@uninit !} {} $($to)?}},)* }] $($tt)*);
     }
   };
   (@stage2 $r:tt, states: { $($t1:tt)* } $($tt:tt)*) => {
@@ -432,7 +428,7 @@ macro_rules! model {
     model!(@stage4[$($r)* @compute{ $($name:$ty [$($deps),*],)*}] $($tt)*);
   };
   (@stage4 $r:tt $(,)?) => { $crate::orbvue_apply!{
-    model!(@stage_final {<model_sort> $r });
+    model!(@stage_final {<:model_sort> $r });
   } };
   (@stage_final [@name $name:ident $($r:tt)*]) => {
     #[cfg(test)]
@@ -538,7 +534,7 @@ mod model_test {
   fn test_model() {
     use super::*;
     use super::test::{W, M};
-    let model = create_model::<M>();
+    let model = model::create::<M>();
     let w = model.build_template(W::default(), Entity::from(0));
     for i in w.0 {
       println!("{:?}", i);
