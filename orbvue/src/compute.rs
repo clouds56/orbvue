@@ -3,16 +3,6 @@ use std::collections::BTreeMap;
 use std::any::TypeId;
 use std::rc::Rc;
 use crate::vue::*;
-pub use paste::item as paste_item;
-// pub struct ComputedSource<P>(&'static str, Entity, std::marker::PhantomData<P>);
-// impl<P: Component + Debug> IntoPropertySource<P> for ComputedSource<P> {
-//   fn into_source(self) -> PropertySource<P> {
-//     PropertySource::KeySource(self.0.to_string(), self.1)
-//   }
-// }
-// pub fn source<P: Component + Debug>(k: &'static str, i: Entity) -> ComputedSource<P> {
-//   ComputedSource(k, i, Default::default())
-// }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ComputedKey(pub &'static str);
@@ -173,7 +163,7 @@ impl<M: Vue> BuildModel<M> {
     self.order.push(name);
   }
 
-  pub fn add_prop_unchecked(&mut self, prop: ComputedProp) {
+  pub unsafe fn add_prop_unchecked(&mut self, prop: ComputedProp) {
     let name = prop.name;
     assert!(!self.props.contains_key(&name), "you should not add computed props multiple times: {:?}", name);
     // TODO: fix downstream here?
@@ -181,8 +171,8 @@ impl<M: Vue> BuildModel<M> {
   }
 
   pub fn build_template(&self, mut this: M::Widget, id: Entity) -> M::Widget {
-    for v in self.props.values() {
-      this = v.build_template(this, id)
+    for name in &self.order {
+      this = self.props.get(name).unwrap().build_template(this, id)
     }
     this
   }
@@ -224,11 +214,11 @@ macro_rules! prop_object {
   (@stage1 $name:ident: $ty:ty [$($tt:tt)*] => $example:expr) => {
     prop_object!(@stage_impl $name: $ty [$($tt)* @example { $example }] );
   };
-  (@stage_impl $name:ident: $ty:ty [@expr {$($expr:tt)*} @example {$($example:tt)*}]) => { $crate::compute::paste_item!{
+  (@stage_impl $name:ident: $ty:ty [@expr {$($expr:tt)*} @example {$($example:tt)*}]) => { $crate::orbvue_apply!{
     #[allow(non_camel_case_types)]
-    pub struct [<prop_ $name>];
-    impl [<prop_ $name>] {
-      pub const NAME: &'static str = stringify!($name);
+    pub struct {<ident> prop_ $name};
+    impl {<ident> prop_ $name} {
+      pub const NAME: &'static str = {<stringify> $name};
       pub fn init() -> $ty {
         $($expr)*
       }
@@ -252,7 +242,7 @@ macro_rules! prop_object {
         vec![]
       }
     }
-    into_computed_prop!([<prop_ $name>]);
+    into_computed_prop!({<ident> prop_ $name});
   } };
   ($($tt:tt)*) => { compile_error!(concat!("macro_error prop_object!: ", stringify!($($tt)*))); };
 }
@@ -261,11 +251,11 @@ macro_rules! state_object {
   ($name:ident: $ty:ty) => {
     state_object!($name: $ty = Default::default());
   };
-  ($name:ident: $ty:ty = $expr:expr) => { $crate::compute::paste_item!{
+  ($name:ident: $ty:ty = $expr:expr) => { $crate::orbvue_apply!{
     #[allow(non_camel_case_types)]
-    pub struct [<state_ $name>];
-    impl [<state_ $name>] {
-      pub const NAME: &'static str = stringify!($name);
+    pub struct {<ident> state_ $name};
+    impl {<ident> state_ $name} {
+      pub const NAME: &'static str = {<stringify> $name};
       pub fn init() -> $ty {
         $expr
       }
@@ -283,16 +273,16 @@ macro_rules! state_object {
         vec![]
       }
     }
-    into_computed_prop!([<state_ $name>]);
+    into_computed_prop!({<ident> state_ $name});
   } };
 }
 #[macro_export]
 macro_rules! compute_object {
-  ($name:ident [$($deps:ident: &$depty:ty),* $(,)?] -> $ty:ty { $($tt:tt)* }) => { $crate::compute::paste_item!{
+  ($name:ident [$($deps:ident: &$depty:ty),* $(,)?] -> $ty:ty { $($tt:tt)* }) => { $crate::orbvue_apply!{
     #[allow(non_camel_case_types)]
-    pub struct [<compute_ $name>];
-    impl [<compute_ $name>] {
-      pub const NAME: &'static str = stringify!($name);
+    pub struct {<ident> compute_ $name};
+    impl {<ident> compute_ $name} {
+      pub const NAME: &'static str = {<stringify> $name};
       #[allow(clippy::ptr_arg)]
       pub fn call($($deps:&$depty),*) -> $ty {
         $($tt)*
@@ -307,10 +297,10 @@ macro_rules! compute_object {
       fn wrapper(store: &mut $crate::vue::StringComponentStore, id: $crate::vue::Entity) -> bool {
         use $crate::compute::{ComputedKey, ComputeHandler};
         $(
-          let $deps = ComputeHandler::get::<$depty>(store, ComputedKey(stringify!($deps)), id);
+          let $deps = ComputeHandler::get::<$depty>(store, ComputedKey({<stringify> $deps}), id);
         )*
-        let [<new_ $name>] = Self::call($($deps),*);
-        ComputeHandler::set(store, ComputedKey(Self::NAME), id, [<new_ $name>], Self::replace)
+        let {<ident> new_ $name} = Self::call($($deps),*);
+        ComputeHandler::set(store, ComputedKey(Self::NAME), id, {<ident> new_ $name}, Self::replace)
       }
       pub fn typeid() -> ::core::any::TypeId {
         ::core::any::TypeId::of::<$ty>()
@@ -319,11 +309,11 @@ macro_rules! compute_object {
         $crate::compute::ComputeHandler::from(Self::wrapper).into()
       }
       pub fn deps() -> Vec<$crate::compute::ComputedKey> {
-        let deps: Vec<&'static str> = vec![$(stringify!($deps)),*];
+        let deps: Vec<&'static str> = vec![$({<stringify> $deps}),*];
         $crate::compute::ComputedKey::from_vec(deps)
       }
     }
-    $crate::into_computed_prop!([<compute_ $name>]);
+    $crate::into_computed_prop!({<ident> compute_ $name});
   } };
 }
 
@@ -337,9 +327,9 @@ macro_rules! model_apply {
     @states { $($name2:ident: $ty2:ty,)* }
     @compute { $($name3:ident:$ty3:ty [$($_2:tt)*],)* }
     $(@sorted $tt:tt)?
-  ]) => { $crate::compute::paste_item! {
+  ]) => { $crate::orbvue_apply!{
     #[allow(non_camel_case_types)]
-    struct [<test_ $name _struct>] {
+    struct {<ident> test_ $name _struct} {
       $($name1:$ty1,)* $($name2:$ty2,)* $($name3:$ty3,)*
     }
   } };
@@ -350,19 +340,19 @@ macro_rules! model_apply {
     @compute { $($name3:ident:$ty3:ty [$($dep3:ident),*],)* }
     @sorted $tt:tt
     $(@init_panic $tpanic:tt)?
-  ]) => { $crate::orbvue_apply!{ $crate::compute::paste_item! {
+  ]) => { $crate::orbvue_apply!{
     #[allow(non_snake_case, clippy::let_unit_value)]
     #[test]
     {<condition>
-      {#[should_panic] fn [<test_ $name _init__should_panic>]()}
-      {fn [<test_ $name _init>]()}
+      {#[should_panic] fn {<ident> test_ $name _init__should_panic}()}
+      {fn {<ident> test_ $name _init}()}
       $($($uninit)?)*
     } {
-      $(let $name1:$ty1 = [<prop_ $name1>]::example();)*
-      $(let $name2:$ty2 = [<state_ $name2>]::init();)*
-      $(let $name3:$ty3 = [<compute_ $name3>]::call($(&$dep3),*);)*
+      $(let $name1:$ty1 = {<ident> prop_ $name1}::example();)*
+      $(let $name2:$ty2 = {<ident> state_ $name2}::init();)*
+      $(let $name3:$ty3 = {<ident> compute_ $name3}::call($(&$dep3),*);)*
     }
-  } } };
+  } };
   (@build_model [
     @name $name:ident
     @props { $($name1:ident: $ty1:ty {$(@uninit $uninit:tt)?},)* }
@@ -370,32 +360,34 @@ macro_rules! model_apply {
     @compute { $($name3:ident:$ty3:ty [$($dep3:ident),*],)* }
     @sorted $tt:tt
     $(@init_panic $tpanic:tt)?
-  ]) => { $crate::orbvue_apply!{ $crate::compute::paste_item! {
+  ]) => { $crate::orbvue_apply!{
     pub fn create<M: $crate::vue::Vue>() -> $crate::compute::BuildModel<M> {
       #[allow(unused_mut)]
       let mut model = $crate::compute::BuildModel::default();
-      $(model.add_prop([<prop_ $name1>].into());)*
-      $(model.add_prop([<state_ $name2>].into());)*
-      $(model.add_prop([<compute_ $name3>].into());)*
+      $(model.add_prop({<ident> prop_ $name1}.into());)*
+      $(model.add_prop({<ident> state_ $name2}.into());)*
+      $(model.add_prop({<ident> compute_ $name3}.into());)*
       model
     }
-  } } };
+  } };
   (@$($tt:tt)*) => { compile_error!(concat!("macro_error model_apply!: @", stringify!($($tt)*))); };
 }
 
 #[macro_export]
 macro_rules! model {
-  (@stage0[], name: $name:ident $($tt:tt)*) => { model!(@stage0_impl[@name $name] $($tt)*); };
-  (@stage0[] $($tt:tt)*) => { model!(@stage0_impl[@name Model] $($tt)*); };
+  (@stage0[], name: $name:ident $($tt:tt)*) => { $crate::macros::model!(@stage0_impl[@name $name] $($tt)*); };
+  (@stage0[] $($tt:tt)*) => { $crate::macros::model!(@stage0_impl[@name Model] $($tt)*); };
   (@stage0_impl[@name $name:ident] $($tt:tt)*) => {
-    // $crate::compute::paste_item! {
-    //   #[allow(dead_code, non_snake_case, non_camel_case_types, unused_imports, unused_variables)]
-    //   mod [<__model_ $name>] {
+    $crate::orbvue_apply! {
+      #[allow(dead_code, non_snake_case, non_camel_case_types, unused_imports, unused_variables)]
+      mod {<ident> __model_ $name} {
+        use super::*;
+        use $crate::macros::*;
         model!(@stage1[@name Model] $($tt)*);
-    //   }
-    //   #[allow(unused_imports)]
-    //   use [<__model_ $name>] as [<create_ $name>];
-    // }
+      }
+      #[allow(unused_imports)]
+      use {<ident> __model_ $name}::create as {<ident> create_ $name};
+    }
   };
   (@stage1 $r:tt, props: { $($ti:tt)* } $($tt:tt)*) => {
     model!(@stage1_loop $r @props{ }, props: {$($ti)*,} $($tt)*);
@@ -414,7 +406,7 @@ macro_rules! model {
     model!(@stage1_impl $r @props{ $($tr)* } $($tt)*);
   };
   (@stage1_impl[$($r:tt)*] @props{ $($name:ident($($to:tt)?):$ty:ty $(= $expr:expr)?),* $(,)? } $($tt:tt)*) => {
-    $($crate::prop_object!($name$($to)?:$ty $(= $expr)?);)*
+    $($crate::macros::prop_object!($name$($to)?:$ty $(= $expr)?);)*
     $crate::orbvue_apply!{
       model!(@stage2[$($r)* @props{ $($name:$ty {{<condition> {@uninit !} {} $($to)?}},)* }] $($tt)*);
     }
@@ -426,7 +418,7 @@ macro_rules! model {
     model!(@stage2_impl $r @states{ } $($tt)*);
   };
   (@stage2_impl[$($r:tt)*] @states{ $($name:ident:$ty:ty $(= $expr:expr)?),* $(,)? } $($tt:tt)*) => {
-    $($crate::state_object!($name:$ty $(= $expr)?);)*
+    $($crate::macros::state_object!($name:$ty $(= $expr)?);)*
     model!(@stage3[$($r)* @states{ $($name:$ty,)* }] $($tt)*);
   };
   (@stage3 $r:tt, compute: { $($t1:tt)* } $($tt:tt)*) => {
@@ -436,25 +428,25 @@ macro_rules! model {
     model!(@stage3_impl $r @compute{ } $($tt)*);
   };
   (@stage3_impl[$($r:tt)*] @compute{ $($name:ident [$($deps:ident: &$depty:ty),* $(,)?] -> $ty:ty { $($ttt:tt)* }),* $(,)? } $($tt:tt)*) => {
-    $($crate::compute_object!($name [$($deps: &$depty),*] -> $ty { $($ttt)* });)*
+    $($crate::macros::compute_object!($name [$($deps: &$depty),*] -> $ty { $($ttt)* });)*
     model!(@stage4[$($r)* @compute{ $($name:$ty [$($deps),*],)*}] $($tt)*);
   };
   (@stage4 $r:tt $(,)?) => { $crate::orbvue_apply!{
     model!(@stage_final {<model_sort> $r });
   } };
-  (@stage_final [@name $name:ident $($r:tt)*]) => {$crate::compute::paste_item! {
+  (@stage_final [@name $name:ident $($r:tt)*]) => {
     #[cfg(test)]
     mod test {
       use super::*;
 
-      $crate::model_apply!(@test_struct [@name $name $($r)*]);
+      model_apply!(@test_struct [@name $name $($r)*]);
 
-      $crate::model_apply!(@test_func [@name $name $($r)*]);
+      model_apply!(@test_func [@name $name $($r)*]);
     }
-    $crate::model_apply!(@build_model [@name $name $($r)*]);
-  } };
+    model_apply!(@build_model [@name $name $($r)*]);
+  };
   (@$($tt:tt)*) => { compile_error!(concat!("macro_error model!: @", stringify!($($tt)*))); };
-  ($($tt:tt)*) => { model!(@stage0[], $($tt)*); };
+  ($($tt:tt)*) => { $crate::macros::model!(@stage0[], $($tt)*); };
 }
 
 #[cfg(test)]
@@ -541,6 +533,17 @@ mod model_test {
     assert_eq!(compute_char::deps(), ComputedKey::from_vec(vec!["vec", "xxx"]));
     assert_eq!(compute_char::typeid(), TypeId::of::<Option<char>>());
   }
+
+  #[test]
+  fn test_model() {
+    use super::*;
+    use super::test::{W, M};
+    let model = create_model::<M>();
+    let w = model.build_template(W::default(), Entity::from(0));
+    for i in w.0 {
+      println!("{:?}", i);
+    }
+  }
 }
 
 #[cfg(test)]
@@ -615,13 +618,14 @@ mod test {
   }
 
   #[derive(Default)]
-  struct M;
+  pub struct M;
   impl super::Vue for M {
     type Widget = W;
+    fn create_model() -> super::BuildModel<Self> { unimplemented!() }
   }
 
   #[derive(Default)]
-  struct W(Vec<((std::any::TypeId, String), Box<dyn std::fmt::Debug>)>);
+  pub struct W(pub Vec<((std::any::TypeId, String), Box<dyn std::fmt::Debug>)>);
   impl super::AddComponent for W {
     fn add_shared_component(mut self, typeid: std::any::TypeId, key: String, source_key: String, source_id: super::Entity) -> Self {
       self.0.push(((typeid, key), Box::new((source_key, source_id)))); self

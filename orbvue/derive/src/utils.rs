@@ -23,8 +23,8 @@ fn token_tree_group(g: Group, delimiter: Option<Delimiter>, stream: TokenStream)
   TokenTree::Group(g)
 }
 
-pub type Functor<'a> = &'a mut dyn FnMut(TokenStream) -> syn::Result<TokenStream>;
-pub fn apply_brace(input: TokenStream, functors: &mut std::collections::HashMap<String, Box<Functor>>) -> TokenStream {
+pub type Functor<'a> = &'a dyn Fn(TokenStream) -> syn::Result<TokenStream>;
+pub fn apply_brace(input: TokenStream, functors: &std::collections::HashMap<String, Functor>) -> TokenStream {
   input.into_iter().map(|i| {
     // println!("apply_brace token: {:?} {:?}", i.span(), i.to_string());
     match i {
@@ -33,8 +33,9 @@ pub fn apply_brace(input: TokenStream, functors: &mut std::collections::HashMap<
         match stream.peek() {
           Some(TokenTree::Punct(c)) if c.as_char() == '<' => {
             let ahead: Vec<_> = (0..3).filter_map(|_| stream.next()).collect();
-            if let Some(f) = check_lead(&ahead).and_then(|s| functors.get_mut(&s)) {
-              let stream = match (*f)(stream.collect()) {
+            if let Some(f) = check_lead(&ahead).and_then(|s| functors.get(&s)) {
+              let stream = apply_brace(stream.collect(), functors);
+              let stream = match (*f)(stream) {
                 Ok(s) => s,
                 Err(e) => {
                   let mut stream = e.to_compile_error(); stream.extend(g.stream());
@@ -64,7 +65,7 @@ pub fn apply_brace(input: TokenStream, functors: &mut std::collections::HashMap<
   }).collect()
 }
 
-pub mod functors {
+mod model {
   use syn::*;
   use crate::Spanable;
   use syn::parse::{Parse, ParseStream};
@@ -101,10 +102,10 @@ pub mod functors {
     }
   }
   #[derive(Clone)]
-  struct Compute {
-    ident: Prop,
-    deps_token: token::Bracket,
-    deps: Punctuated<Ident, Token![,]>,
+  pub struct Compute {
+    pub ident: Prop,
+    pub deps_token: token::Bracket,
+    pub deps: Punctuated<Ident, Token![,]>,
   }
   impl Spanable for Compute {
     fn span(&self) -> Span { self.ident.span() }
@@ -128,23 +129,23 @@ pub mod functors {
   impl Compute {
     pub fn dep_names(&self) -> Vec<String> { self.deps.iter().map(|i| i.to_string()).collect() }
   }
-  struct ModelArgs<T> {
-    token: (Token![@], Ident),
-    arg: T,
+  pub struct ModelArgs<T> {
+    pub token: (Token![@], Ident),
+    pub arg: T,
   }
-  type ModelArgsPunctuated<T> = ModelArgs<(token::Brace, Punctuated<T, Token![,]>)>;
+  pub type ModelArgsPunctuated<T> = ModelArgs<(token::Brace, Punctuated<T, Token![,]>)>;
   impl<T: ToTokens> ToTokens for ModelArgs<T> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
       self.to_tokens_with(tokens, T::to_tokens)
     }
   }
   impl<T: Parse> ModelArgs<T> {
-    fn parse(input: ParseStream, name: &str) -> Result<Self> {
+    pub fn parse(input: ParseStream, name: &str) -> Result<Self> {
       Self::parse_with(input, name, T::parse)
     }
   }
   impl<T> ModelArgs<T> {
-    fn parse_with<F: FnOnce(ParseStream) -> Result<T>>(input: ParseStream, name: &str, f: F) -> Result<Self> {
+    pub fn parse_with<F: FnOnce(ParseStream) -> Result<T>>(input: ParseStream, name: &str, f: F) -> Result<Self> {
       let token = (input.parse()?, input.parse()?);
       if token.1 != name {
         return Err(input.error("check name failed"))
@@ -154,14 +155,14 @@ pub mod functors {
         arg: f(input)?,
       })
     }
-    fn to_tokens_with<F: FnOnce(&T, &mut TokenStream)>(&self, tokens: &mut TokenStream, f: F) {
+    pub fn to_tokens_with<F: FnOnce(&T, &mut TokenStream)>(&self, tokens: &mut TokenStream, f: F) {
       self.token.0.to_tokens(tokens);
       self.token.1.to_tokens(tokens);
       f(&self.arg, tokens);
     }
   }
   impl ModelArgs<TokenTree> {
-    fn parse_any(input: ParseStream) -> Result<Self> {
+    pub fn parse_any(input: ParseStream) -> Result<Self> {
       Ok(Self {
         token: (input.parse()?, input.parse()?),
         arg: input.parse()?,
@@ -169,7 +170,7 @@ pub mod functors {
     }
   }
   impl<T: Parse, P: Parse> ModelArgs<(token::Brace, Punctuated<T, P>)> {
-    fn parse_punctuated(input: ParseStream, name: &str) -> Result<Self> {
+    pub fn parse_punctuated(input: ParseStream, name: &str) -> Result<Self> {
       Self::parse_with(input, name, |input| {
         let content;
         Ok((braced!(content in input), Punctuated::parse_terminated(&content)?))
@@ -177,20 +178,20 @@ pub mod functors {
     }
   }
   impl<T: ToTokens, P: ToTokens> ModelArgs<(token::Brace, Punctuated<T, P>)> {
-    fn to_tokens_punctuated(&self, tokens: &mut TokenStream) {
+    pub fn to_tokens_punctuated(&self, tokens: &mut TokenStream) {
       self.to_tokens_with(tokens, |inner, tokens| {
         inner.0.surround(tokens, |t| inner.1.to_tokens(t))
       })
     }
   }
-  struct Model {
-    bracket: token::Bracket,
-    name: ModelArgs<Ident>,
-    props: ModelArgsPunctuated<Prop>,
-    states: ModelArgsPunctuated<Prop>,
-    compute: ModelArgsPunctuated<Compute>,
-    etc: Vec<ModelArgs<TokenTree>>,
-    sorted: Option<Punctuated<Prop, Token![,]>>,
+  pub struct Model {
+    pub bracket: token::Bracket,
+    pub name: ModelArgs<Ident>,
+    pub props: ModelArgsPunctuated<Prop>,
+    pub states: ModelArgsPunctuated<Prop>,
+    pub compute: ModelArgsPunctuated<Compute>,
+    pub etc: Vec<ModelArgs<TokenTree>>,
+    pub sorted: Option<Punctuated<Prop, Token![,]>>,
   }
   impl Parse for Model {
     fn parse(input_all: ParseStream) -> Result<Self> {
@@ -280,14 +281,20 @@ pub mod functors {
       self.sorted = Some(result.into_iter().map(|(i, v)| Pair::Punctuated(i, v)).collect());
     }
   }
+}
 
+pub mod functors {
+  use syn::Result;
+  use proc_macro2::TokenStream;
   pub fn model_sort(input: TokenStream) -> Result<TokenStream> {
-    let mut model: Model = syn::parse2(input)?;
+    let mut model: super::model::Model = syn::parse2(input)?;
     model.sort();
     Ok(quote!{ #model })
   }
 
   pub fn condition(input: TokenStream) -> Result<TokenStream> {
+    use proc_macro2::{TokenTree, Delimiter};
+    use quote::ToTokens;
     let mut stream = input.into_iter();
     let true_branch = stream.next();
     let false_branch = stream.next();
@@ -303,5 +310,36 @@ pub mod functors {
       _ => result.into_token_stream(),
     };
     Ok(result)
+  }
+
+  fn tokens_concat(input: TokenStream) -> (proc_macro2::Span, String) {
+    use proc_macro2::Span;
+    let mut span: Option<Span> = None;
+    let mut name = String::new();
+    for i in input {
+      span = Some(match span {
+        Some(span) => span.join(i.span()).unwrap_or(span),
+        _ => i.span(),
+      });
+      name.push_str(&i.to_string());
+    }
+    name = name.chars().filter_map(|i| match i {
+      ' ' => None,
+      ':' | '#' | '<' | '>' => Some('_'),
+      _ => Some(i),
+    }).collect();
+    // println!("ident: {}", name);
+    (span.unwrap_or_else(Span::call_site), name)
+  }
+
+  pub fn ident(input: TokenStream) -> Result<TokenStream> {
+    use proc_macro2::Ident;
+    let (span, name) = tokens_concat(input);
+    let ident = Ident::new(&name, span);
+    Ok(quote! { #ident })
+  }
+  pub fn stringify(input: TokenStream) -> Result<TokenStream> {
+    let (span, name) = tokens_concat(input);
+    Ok(quote_spanned! {span=> #name })
   }
 }

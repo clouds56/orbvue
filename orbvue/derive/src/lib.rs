@@ -58,10 +58,11 @@ pub fn build_template(input: TokenStream) -> TokenStream {
 
 #[proc_macro]
 pub fn orbvue_apply(input: TokenStream) -> TokenStream {
-  let mut model_sort = utils::functors::model_sort;
-  let mut condition = utils::functors::condition;
-  let mut functors: std::collections::HashMap<String, Box<utils::Functor>> = std::collections::HashMap::new();
-  functors.insert("model_sort".to_string(), Box::new(&mut model_sort));
-  functors.insert("condition".to_string(), Box::new(&mut condition));
-  utils::apply_brace(input.into(), &mut functors).into()
+  use utils::functors::*;
+  let mut functors: std::collections::HashMap<String, utils::Functor> = std::collections::HashMap::new();
+  functors.insert("model_sort".to_string(), &model_sort);
+  functors.insert("condition".to_string(), &condition);
+  functors.insert("ident".to_string(), &ident);
+  functors.insert("stringify".to_string(), &stringify);
+  utils::apply_brace(input.into(), &functors).into()
 }
