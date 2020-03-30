@@ -70,7 +70,7 @@ pub mod functors {
   use syn::parse::{Parse, ParseStream};
   use syn::punctuated::{Punctuated, Pair};
   use proc_macro2::{TokenStream, Span, TokenTree, Delimiter};
-  use quote::ToTokens;
+  use quote::{TokenStreamExt, ToTokens};
 
   #[derive(Clone)]
   pub struct Prop(pub Ident, pub Token![:], pub Type, pub Option<TokenTree>);
@@ -128,32 +128,81 @@ pub mod functors {
   impl Compute {
     pub fn dep_names(&self) -> Vec<String> { self.deps.iter().map(|i| i.to_string()).collect() }
   }
+  struct ModelArgs<T> {
+    token: (Token![@], Ident),
+    arg: T,
+  }
+  type ModelArgsPunctuated<T> = ModelArgs<(token::Brace, Punctuated<T, Token![,]>)>;
+  impl<T: ToTokens> ToTokens for ModelArgs<T> {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+      self.to_tokens_with(tokens, T::to_tokens)
+    }
+  }
+  impl<T: Parse> ModelArgs<T> {
+    fn parse(input: ParseStream, name: &str) -> Result<Self> {
+      Self::parse_with(input, name, T::parse)
+    }
+  }
+  impl<T> ModelArgs<T> {
+    fn parse_with<F: FnOnce(ParseStream) -> Result<T>>(input: ParseStream, name: &str, f: F) -> Result<Self> {
+      let token = (input.parse()?, input.parse()?);
+      if token.1 != name {
+        return Err(input.error("check name failed"))
+      }
+      Ok(Self {
+        token,
+        arg: f(input)?,
+      })
+    }
+    fn to_tokens_with<F: FnOnce(&T, &mut TokenStream)>(&self, tokens: &mut TokenStream, f: F) {
+      self.token.0.to_tokens(tokens);
+      self.token.1.to_tokens(tokens);
+      f(&self.arg, tokens);
+    }
+  }
+  impl ModelArgs<TokenTree> {
+    fn parse_any(input: ParseStream) -> Result<Self> {
+      Ok(Self {
+        token: (input.parse()?, input.parse()?),
+        arg: input.parse()?,
+      })
+    }
+  }
+  impl<T: Parse, P: Parse> ModelArgs<(token::Brace, Punctuated<T, P>)> {
+    fn parse_punctuated(input: ParseStream, name: &str) -> Result<Self> {
+      Self::parse_with(input, name, |input| {
+        let content;
+        Ok((braced!(content in input), Punctuated::parse_terminated(&content)?))
+      })
+    }
+  }
+  impl<T: ToTokens, P: ToTokens> ModelArgs<(token::Brace, Punctuated<T, P>)> {
+    fn to_tokens_punctuated(&self, tokens: &mut TokenStream) {
+      self.to_tokens_with(tokens, |inner, tokens| {
+        inner.0.surround(tokens, |t| inner.1.to_tokens(t))
+      })
+    }
+  }
   struct Model {
     bracket: token::Bracket,
-    props_token: (Token![@], Ident, token::Brace),
-    props: Punctuated<Prop, Token![,]>,
-    states_token: (Token![@], Ident, token::Brace),
-    states: Punctuated<Prop, Token![,]>,
-    compute_token: (Token![@], Ident, token::Brace),
-    compute: Punctuated<Compute, Token![,]>,
-    other: TokenStream,
+    name: ModelArgs<Ident>,
+    props: ModelArgsPunctuated<Prop>,
+    states: ModelArgsPunctuated<Prop>,
+    compute: ModelArgsPunctuated<Compute>,
+    etc: Vec<ModelArgs<TokenTree>>,
     sorted: Option<Punctuated<Prop, Token![,]>>,
   }
   impl Parse for Model {
     fn parse(input_all: ParseStream) -> Result<Self> {
       let input;
-
       let bracket = bracketed!(input in input_all);
-      let mut content;
       Ok(Self {
         bracket,
-        props_token: (input.parse()?, input.parse()?, braced!(content in input)),
-        props: Punctuated::parse_terminated(&content)?,
-        states_token: (input.parse()?, input.parse()?, braced!(content in input)),
-        states: Punctuated::parse_terminated(&content)?,
-        compute_token: (input.parse()?, input.parse()?, braced!(content in input)),
-        compute: Punctuated::parse_terminated(&content)?,
-        other: input.parse()?,
+        name: ModelArgs::parse(&input, "name")?,
+        props: ModelArgsPunctuated::parse_punctuated(&input, "props")?,
+        states: ModelArgsPunctuated::parse_punctuated(&input, "states")?,
+        compute: ModelArgsPunctuated::parse_punctuated(&input, "compute")?,
+        etc: Self::parse_terminated_with(&input, ModelArgs::parse_any)?,
         sorted: None,
       })
     }
@@ -161,25 +210,27 @@ pub mod functors {
   impl ToTokens for Model {
     fn to_tokens(&self, tokens: &mut TokenStream) {
       self.bracket.surround(tokens, |tokens| {
-        let ((a, b, c), d) = (&self.props_token, &self.props);
-        tokens.extend(quote! { #a#b });
-        c.surround(tokens, |t| d.to_tokens(t));
-        let ((a, b, c), d) = (&self.states_token, &self.states);
-        tokens.extend(quote! { #a#b });
-        c.surround(tokens, |t| d.to_tokens(t));
-        let ((a, b, c), d) = (&self.compute_token, &self.compute);
-        tokens.extend(quote! { #a#b });
-        c.surround(tokens, |t| d.to_tokens(t));
+        self.name.to_tokens(tokens);
+        self.props.to_tokens_punctuated(tokens);
+        self.states.to_tokens_punctuated(tokens);
+        self.compute.to_tokens_punctuated(tokens);
         if let Some(sorted) = &self.sorted {
           tokens.extend(quote!{
             @sorted { #sorted }
           })
         }
-        tokens.extend(self.other.clone());
+        tokens.append_all(&self.etc);
       })
     }
   }
   impl Model {
+    fn parse_terminated_with<T, F: Fn(ParseStream) -> Result<T>>(input: ParseStream, f: F) -> Result<Vec<T>> {
+      let mut v = Vec::new();
+      while !input.is_empty() {
+        v.push(f(input)?)
+      }
+      Ok(v)
+    }
     fn pair_to_tuple<T: Spanable + Clone>(pair: Pair<&T, &Token![,]>) -> (T, Token![,]) {
       match pair {
         Pair::Punctuated(i, v) => { (i.clone(), *v) },
@@ -188,9 +239,9 @@ pub mod functors {
     }
     pub fn sort(&mut self) {
       use std::collections::{HashSet, VecDeque};
-      let mut queue = self.props.pairs().chain(self.states.pairs())
+      let mut queue = self.props.arg.1.pairs().chain(self.states.arg.1.pairs())
         .map(|pair| Some(Self::pair_to_tuple(pair))).collect::<VecDeque<_>>();
-      let mut remain = self.compute.pairs().map(|pair| {
+      let mut remain = self.compute.arg.1.pairs().map(|pair| {
         let pair = Self::pair_to_tuple(pair);
         (pair.0.dep_names().into_iter().collect::<HashSet<_>>(), pair)
       }).collect::<Vec<_>>();
@@ -225,7 +276,7 @@ pub mod functors {
           }
         }
       }
-      self.compute = result2.into_iter().map(|(i, v)| Pair::Punctuated(i, v)).collect();
+      self.compute.arg.1 = result2.into_iter().map(|(i, v)| Pair::Punctuated(i, v)).collect();
       self.sorted = Some(result.into_iter().map(|(i, v)| Pair::Punctuated(i, v)).collect());
     }
   }

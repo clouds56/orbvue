@@ -19,7 +19,15 @@ build_template!{
 use orbvue::*;
 model!{
   props: {
+    greet: String16 = "hello".into(),
+  },
+  states: {
     text: String16
+  },
+  compute: {
+    show_test [text: &String16, greet: &String16] -> String16 {
+      format!("{}, {}!", greet, text).into()
+    },
   }
 }
 
@@ -53,7 +61,7 @@ widget!(MainView<MainViewState> {
   text: String16
 });
 
-impl orbvue::compute::AddComponent for MainView {
+impl orbvue::vue::AddComponent for MainView {
   fn add_shared_component(mut self, typeid: std::any::TypeId, key: String, source_key: String, source_id: Entity) -> Self {
     self.shared_attached_properties.insert((key, source_key), SharedComponentBox::new(typeid, source_id)); self
   }
