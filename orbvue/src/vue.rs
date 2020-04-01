@@ -1,5 +1,5 @@
 use std::fmt::Debug;
-use crate::compute::BuildModel;
+use crate::model::BuildModel;
 pub use orbtk::{StringComponentStore, Component, Entity, SharedComponentBox, ComponentBox};
 
 pub trait Vue: Sized {
@@ -21,7 +21,7 @@ macro_rules! vue {
     pub struct $name;
     impl $crate::vue::Vue for $name {
       type Widget = $widget;
-      fn create_model() -> $crate::compute::BuildModel<Self> {
+      fn create_model() -> $crate::model::BuildModel<Self> {
         <$model>::create()
       }
     }
