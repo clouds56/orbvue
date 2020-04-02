@@ -1,39 +1,88 @@
 use std::rc::Rc;
-use std::cell::RefCell;
-use std::ops::{Deref, DerefMut};
+use std::cell::{RefCell, Ref, RefMut};
 
-pub struct TraceRef<'a, T>(Box<dyn Deref<Target=T> + 'a>);
-pub struct TraceMut<'a, T>(Box<dyn DerefMut<Target=T> + 'a>, Box<dyn FnMut() + 'a>);
-impl<'a, T> TraceRef<'a, T> {
-  fn new(p: impl Deref<Target=T> + 'a) -> Self {
-    Self(Box::new(p))
-  }
+pub enum TraceCopy<T> {
+  Raw(T),
+  Rc(Rc<RefCell<T>>),
+}
+pub enum TraceRef<'a, T> {
+  Raw(&'a T),
+  Rc(Ref<'a, T>, &'a Rc<RefCell<T>>),
+}
+pub enum TraceMut<'a, T> {
+  Raw(&'a mut T, &'a mut u32),
+  Rc(RefMut<'a, T>, &'a Rc<RefCell<T>>, &'a mut u32),
 }
 
 impl<T> std::ops::Deref for TraceRef<'_, T> {
   type Target = T;
   fn deref(&self) -> &Self::Target {
-    &self.0
+    match self {
+      TraceRef::Raw(ptr) => ptr.deref(),
+      TraceRef::Rc(ptr, _) => ptr.deref(),
+    }
   }
 }
-
 impl<T> std::ops::Deref for TraceMut<'_, T> {
   type Target = T;
   fn deref(&self) -> &Self::Target {
-    &self.0
+    match self {
+      TraceMut::Raw(ptr, _) => ptr.deref(),
+      TraceMut::Rc(ptr, _, _) => ptr.deref(),
+    }
   }
 }
-
 impl<T> std::ops::DerefMut for TraceMut<'_, T> {
   fn deref_mut(&mut self) -> &mut Self::Target {
-    self.1();
-    &mut self.0
+    use std::ops::AddAssign;
+    match self {
+      TraceMut::Raw(ptr, dirty) => { dirty.add_assign(1); ptr.deref_mut() },
+      TraceMut::Rc(ptr, _, dirty) => { dirty.add_assign(1); ptr.deref_mut() },
+    }
   }
 }
-
+impl<'a, T> TraceRef<'a, T> {
+  fn new_raw(p: &'a T) -> Self {
+    TraceRef::Raw(p)
+  }
+  fn new_rc(r: &'a Rc<RefCell<T>>) -> Self {
+    TraceRef::Rc(r.borrow(), r)
+  }
+  pub fn cloned(&self) -> TraceCopy<T> {
+    match *self {
+      TraceRef::Raw(_t) => unimplemented!(),
+      TraceRef::Rc(_, t) => TraceCopy::Rc(t.clone()),
+    }
+  }
+}
+impl<'a, T: Clone> TraceRef<'a, T> {
+  pub fn copy(&self) -> TraceCopy<T> {
+    match *self {
+      TraceRef::Raw(t) => TraceCopy::Raw(t.clone()),
+      TraceRef::Rc(_, t) => TraceCopy::Rc(t.clone()),
+    }
+  }
+}
 impl<'a, T> TraceMut<'a, T> {
-  fn new(p: impl DerefMut<Target=T> + 'a, f: impl FnMut() + 'a) -> Self {
-    Self(Box::new(p), Box::new(f))
+  fn new_raw(p: &'a mut T, dirty: &'a mut u32) -> Self {
+    TraceMut::Raw(p, dirty)
+  }
+  fn new_rc(r: &'a Rc<RefCell<T>>, dirty: &'a mut u32) -> Self {
+    TraceMut::Rc(r.borrow_mut(), r, dirty)
+  }
+  pub fn cloned(&self) -> TraceCopy<T> {
+    match self {
+      TraceMut::Raw(_t, _) => unimplemented!(),
+      &TraceMut::Rc(_, t, _) => TraceCopy::Rc(t.clone()),
+    }
+  }
+}
+impl<'a, T: Clone> TraceMut<'a, T> {
+  pub fn copy(&self) -> TraceCopy<T> {
+    match self {
+      TraceMut::Raw(t, _) => TraceCopy::Raw((*t).clone()),
+      &TraceMut::Rc(_, t, _) => TraceCopy::Rc(t.clone()),
+    }
   }
 }
 
@@ -56,10 +105,9 @@ pub struct Data<T> {
 impl<T> Tracable for Data<T> {
   type Target = T;
   fn new(t: T) -> Self { Self { data: t, dirty: 0 } }
-  fn get(&self) -> TraceRef<'_, Self::Target> { TraceRef::new(&self.data) }
+  fn get(&self) -> TraceRef<'_, Self::Target> { TraceRef::new_raw(&self.data) }
   fn get_mut(&mut self) -> TraceMut<'_, Self::Target> {
-    let dirty = &mut self.dirty;
-    TraceMut::new(&mut self.data, move || *dirty += 1)
+    TraceMut::new_raw(&mut self.data, &mut self.dirty)
    }
   fn clean(&mut self) { self.dirty = 0; }
   fn mess_up(&mut self) { self.dirty += 1; }
@@ -69,7 +117,7 @@ impl<T: 'static> Data<T> {
   pub fn downcast<U: 'static>(&self) -> Option<&Data<U>> {
     use std::any::TypeId;
     if TypeId::of::<T>() == TypeId::of::<U>() {
-      Some(unsafe { std::mem::transmute(self) })
+      Some(unsafe { &*(self as *const _ as *const _) })
     } else {
       None
     }
@@ -77,9 +125,18 @@ impl<T: 'static> Data<T> {
   pub fn downcast_mut<U: 'static>(&mut self) -> Option<&mut Data<U>> {
     use std::any::TypeId;
     if TypeId::of::<T>() == TypeId::of::<U>() {
-      Some(unsafe { std::mem::transmute(self) })
+      Some(unsafe { &mut *(self as *mut _ as *mut _) })
     } else {
       None
+    }
+  }
+}
+impl<T: Clone> Data<T> {
+  pub fn from_copy(&mut self, r: TraceCopy<T>) {
+    self.mess_up();
+    match r {
+      TraceCopy::Raw(t) => self.data = t,
+      TraceCopy::Rc(t) => self.data = t.borrow().clone(),
     }
   }
 }
@@ -117,21 +174,40 @@ pub struct SharedData<T> {
 impl<T> Tracable for SharedData<T> {
   type Target = T;
   fn new(t: T) -> Self { Self { data: Rc::new(RefCell::new(t)), dirty: 0 } }
-  fn get(&self) -> TraceRef<'_, Self::Target> { TraceRef::new(self.data.borrow()) }
+  fn get(&self) -> TraceRef<'_, Self::Target> { TraceRef::new_rc(&self.data) }
   fn get_mut(&mut self) -> TraceMut<'_, Self::Target> {
-    let dirty = &mut self.dirty;
-    TraceMut::new(self.data.borrow_mut(), move || *dirty += 1)
+    TraceMut::new_rc(&self.data, &mut self.dirty)
   }
   fn clean(&mut self) { self.dirty = 0; }
   fn mess_up(&mut self) { self.dirty += 1; }
   fn dirty(&self) -> bool { self.dirty > 0 }
 }
+impl<T> SharedData<T> {
+  pub fn inner(&self) -> Rc<RefCell<T>> {
+    self.data.clone()
+  }
+  pub fn from_copy(&mut self, r: TraceCopy<T>) {
+    self.mess_up();
+    match r {
+      TraceCopy::Raw(t) => self.data = Rc::new(RefCell::new(t)),
+      TraceCopy::Rc(t) => self.data = t,
+    }
+  }
+}
 
 impl<T: 'static> SharedData<T> {
-  pub fn downcast<U: 'static>(&self) -> Option<&Data<U>> {
+  pub fn downcast<U: 'static>(&self) -> Option<&SharedData<U>> {
     use std::any::TypeId;
     if TypeId::of::<T>() == TypeId::of::<U>() {
-      Some(unsafe { std::mem::transmute(self) })
+      Some(unsafe { &*(self as *const _ as *const _) })
+    } else {
+      None
+    }
+  }
+  pub fn downcast_mut<U: 'static>(&mut self) -> Option<&mut SharedData<U>> {
+    use std::any::TypeId;
+    if TypeId::of::<T>() == TypeId::of::<U>() {
+      Some(unsafe { &mut *(self as *mut _ as *mut _) })
     } else {
       None
     }
@@ -206,14 +282,14 @@ macro_rules! state {
         fn get<T: 'static>(&self, name: &str) -> Option<$crate::state::TraceRef<'_, T>> {
           use $crate::state::Tracable;
           match name {
-            $({<:stringify> $n} => Some(self.$n.downcast::<T>().expect(&format!("wrong type downcast {}", name)).get()),)*
+            $({<:stringify> $n} => Some(self.$n.downcast::<T>().unwrap_or_else(|| panic!("wrong type downcast {}", name)).get()),)*
             _ => None,
           }
         }
         fn get_mut<T: 'static>(&mut self, name: &str) -> Option<$crate::state::TraceMut<'_, T>> {
           use $crate::state::Tracable;
           match name {
-            $({<:stringify> $n} => Some(self.$n.downcast_mut::<T>().expect(&format!("wrong type downcast {}", name)).get_mut()),)*
+            $({<:stringify> $n} => Some(self.$n.downcast_mut::<T>().unwrap_or_else(|| panic!("wrong type downcast {}", name)).get_mut()),)*
             _ => None,
           }
         }
@@ -236,7 +312,87 @@ pub trait TracedState {
   fn get_mut<T: 'static>(&mut self, name: &str) -> Option<TraceMut<'_, T>>;
 }
 
-mod test_helper {
+#[cfg(test)]
+mod test_shared {
+  use super::*;
+  struct State {
+    a: Data<usize>,
+    b: SharedData<String>,
+  }
+
+  impl TracedState for State {
+    fn get<T: 'static>(&self, name: &str) -> Option<TraceRef<'_, T>> {
+      match name {
+        "a" => Some(self.a.downcast::<T>().unwrap_or_else(|| panic!("wrong type downcast {}", name)).get()),
+        "b" => Some(self.b.downcast::<T>().unwrap_or_else(|| panic!("wrong type downcast {}", name)).get()),
+        _ => None,
+      }
+    }
+    fn get_mut<T: 'static>(&mut self, name: &str) -> Option<TraceMut<'_, T>> {
+      match name {
+        "a" => Some(self.a.downcast_mut::<T>().unwrap_or_else(|| panic!("wrong type downcast {}", name)).get_mut()),
+        "b" => Some(self.b.downcast_mut::<T>().unwrap_or_else(|| panic!("wrong type downcast {}", name)).get_mut()),
+        _ => None,
+      }
+    }
+  }
+
+  impl State {
+    #[allow(dead_code)]
+    pub fn new(a: usize, b: String) -> Self {
+      Self {
+        a: Data::new(a),
+        b: SharedData::new(b),
+      }
+    }
+  }
+
+  #[test]
+  fn test_state_proxy() {
+    use super::{Tracable, TracedState};
+    let mut s = State::new(5, "b".to_string());
+    *s.get_mut::<usize>("a").unwrap() += 1;
+    assert_eq!(*s.get::<usize>("a").unwrap(), 6);
+    assert!(s.a.dirty());
+    let b = s.b.inner();
+    b.borrow_mut().push_str(".");
+    assert_eq!(*s.get::<String>("b").unwrap(), "b.");
+    assert!(s.get::<()>("c").is_none());
+  }
+
+  #[test]
+  #[should_panic]
+  fn test_state_proxy_panic() {
+    use super::TracedState;
+    let s = State::new(5, "b".to_string());
+    s.get::<&str>("b");
+  }
+
+  #[test]
+  fn test_state_ref_copy() {
+    let a = Data::new(5);
+    let mut b = Data::new(6);
+    b.from_copy(a.get().copy());
+    assert_eq!(*b.get(), 5);
+    assert!(b.dirty());
+    let mut b = SharedData::new(6);
+    b.from_copy(a.get().copy());
+    assert_eq!(*b.get(), 5);
+    assert!(b.dirty());
+    b.clean();
+    let a = SharedData::new(6);
+    b.from_copy(a.get().copy());
+    assert_eq!(*b.get(), 6);
+    assert!(b.dirty());
+    let mut a = Data::new(5);
+    a.from_copy(b.get().copy());
+    assert_eq!(*a.get(), 6);
+    assert!(a.dirty());
+  }
+}
+
+#[cfg(test)]
+mod test {
   crate::state!(State: {
     a: usize,
     b: String,

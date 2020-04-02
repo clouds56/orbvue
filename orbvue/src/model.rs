@@ -30,7 +30,6 @@ impl<M: Vue> BuildModel<M> {
   pub fn add_prop(&mut self, prop: ComputedProp) {
     let name = prop.name;
     assert!(!self.props.contains_key(&name), "you should not add computed props multiple times: {:?}", name);
-    // TODO: fix downstream here?
     for up in &prop.dep.upstream {
       match self.props.get_mut(up) {
         Some(up) => up.dep.downstream.push(prop.name),
@@ -85,6 +84,16 @@ macro_rules! model_apply {
       $(let $name2:$ty2 = {<:ident> state_ $name2}::init();)*
       $(let $name3:$ty3 = {<:ident> compute_ $name3}::call($(&$dep3),*);)*
     }
+  } };
+  (@build_state [
+    @name $name:ident
+    @props { $($name1:ident: $ty1:ty {$(@uninit $uninit:tt)?},)* }
+    @states { $($name2:ident: $ty2:ty,)* }
+    @compute { $($name3:ident:$ty3:ty [$($dep3:ident),*],)* }
+    @sorted $tt:tt
+    $(@init_panic $tpanic:tt)?
+  ]) => { $crate::orbvue_apply!{
+    state!({<:ident> $name _State} : { $($name2: $ty2,)* });
   } };
   (@build_model [
     @name $name:ident
@@ -176,9 +185,9 @@ macro_rules! model {
       use super::*;
 
       model_apply!(@test_struct [@name $name $($r)*]);
-
       model_apply!(@test_func [@name $name $($r)*]);
     }
+    model_apply!(@build_state [@name $name $($r)*]);
     model_apply!(@build_model [@name $name $($r)*]);
   };
   (@$($tt:tt)*) => { compile_error!(concat!("macro_error model!: @", stringify!($($tt)*))); };
